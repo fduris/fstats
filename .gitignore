@@ -54,3 +54,9 @@ settings.json
 
 # CLion stuff
 .idea/*
+!.idea/.gitignore
+!.idea/editor.xml
+!.idea/libfstats.iml
+!.idea/misc.xml
+!.idea/modules.xml
+!.idea/workspace.xml

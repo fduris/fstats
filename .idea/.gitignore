@@ -1,0 +1,11 @@
+# Local CLion noise
+shelf/
+httpRequests/
+dataSources/
+dataSources.ids
+dataSources.local.xml
+dictionaries/
+inspectionProfiles/
+tasks.xml
+usage.statistics.xml
+copilot.*
