@@ -16,7 +16,7 @@ set_target_properties(collections PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${MT_DIR}
 )
 
-set(collections_INCLUDE_DIR ${collections_BINARY_DIR}/include)
+set(collections_INCLUDE_DIR ${collections_BINARY_DIR}/src/mod_files)
 set(collections_INCLUDE_DIR ${collections_INCLUDE_DIR} PARENT_SCOPE)
 
 # Make a parent-scope variable for the library
