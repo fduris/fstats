@@ -46,9 +46,14 @@ add_library(fstats SHARED
     ${MT_SOURCES}
 )
 
+# Resolve the sibling dependency libraries (ferror/linalg/collections) from this
+# library's own directory via an $ORIGIN runpath, so the shipped libfstats.so
+# loads from the repo root on any machine without a post-build patchelf step.
 set_target_properties(fstats PROPERTIES
     OUTPUT_NAME fstats
     POSITION_INDEPENDENT_CODE TRUE
+    INSTALL_RPATH "$ORIGIN"
+    BUILD_WITH_INSTALL_RPATH TRUE
     LIBRARY_OUTPUT_DIRECTORY ${MT_DIR}
     RUNTIME_OUTPUT_DIRECTORY ${MT_DIR}
 )
