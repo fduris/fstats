@@ -9,9 +9,14 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(collections)
 
+# Keep the default unversioned SONAME (libcollections.so) so consumers record a
+# relative DT_NEEDED, and resolve siblings (libferror.so) from the library's own
+# directory via an $ORIGIN runpath. Both let the shipped .so load from the repo
+# root on any machine without a post-build patchelf step.
 set_target_properties(collections PROPERTIES
     OUTPUT_NAME "collections"
-    NO_SONAME ON
+    INSTALL_RPATH "$ORIGIN"
+    BUILD_WITH_INSTALL_RPATH TRUE
     LIBRARY_OUTPUT_DIRECTORY ${MT_DIR}
     RUNTIME_OUTPUT_DIRECTORY ${MT_DIR}
 )
