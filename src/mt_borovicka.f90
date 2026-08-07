@@ -1,7 +1,6 @@
 ! =======================================================================
 ! MTBorovicka -- Native per-sample Borovicka straight-line radiant
-! solver, replacing the
-! `minimize4` call in `source_scripts/borovicka.r`.
+! solver, replacing the straight-line radiant fit.
 !
 ! A meteor's atmospheric trajectory is modelled as a single straight line, a
 ! point P (Mm) plus a direction R (the radiant, unitless). Each observation is
@@ -21,22 +20,17 @@
 ! onto the new argmax and refits; anything still bound-active, non-converged, or
 ! degenerate returns NaN (the documented non-convergence signal).
 !
-! The R optimizer is L-BFGS-B 2.1 (via optim) run at maxit=100; callers of this
-! native port must pass maxit=300 -- the vendored 3.0 uses the corrected machine
-! epsilon (epsilon(one)) where 2.1's legacy dpmeps OVERestimates it, so 3.0's
-! factr*epsmch stop is strictly stricter and legitimately needs more iterations
-! for the same factr; 300 gives ~3x headroom and lands on the
-! identical minimum to <= 1e-8. Do NOT compensate factr.
+! Callers must pass maxit = 300: the factr*epsmch stop uses the corrected
+! machine epsilon epsilon(one), which needs more iterations for the same
+! factr than a looser epsmch would. Do NOT compensate by changing factr.
 !
-! The cost is computed as a SCALAR per-point accumulation loop, NOT a vectorized
-! re-association: the R reference documents FF4 as scalar-on-purpose because
-! R's optim minimum shifts ~1e-8 under sum-reordering (see docs/architecture.md).
-! This loop reproduces R's FF4scalarRef, which agrees with
-! the vectorized FF4 to < 1e-10.
+! The cost is a SCALAR per-point accumulation loop, deliberately not a
+! vectorized re-association: the converged minimum shifts by ~1e-8 under
+! sum reordering.
 !
 ! Stateless: no SAVE, no module variables mutated at call time, no I/O. All
 ! working storage is local to each call, so a re-pivot in one call cannot leak
-! into another (the cross-sample pivot-leakage hazard the R comment warns of).
+! into another, so a re-pivot in one call cannot leak into the next.
 ! =======================================================================
 module MTBorovicka
 
@@ -70,8 +64,7 @@ contains
 
 ! -----------------------------------------------------------------------
 ! FreeIndices -- The two component indices other than the pivot k, in
-! increasing order
-! (R's setdiff(1:3, k)). The order fixes which q slot maps to which axis.
+! increasing order The order fixes which q slot maps to which axis.
 ! -----------------------------------------------------------------------
 pure subroutine FreeIndices(k, f1, f2)
     integer(int32), intent(in) :: k
@@ -88,9 +81,8 @@ pure subroutine FreeIndices(k, f1, f2)
 end subroutine FreeIndices
 
 ! -----------------------------------------------------------------------
-! SelectPivot -- Index of the largest-magnitude radiant component (R's
-! which.max(abs(radiant))). maxloc returns the FIRST maximum, so ties break
-! to the lowest index exactly as which.max does.
+! SelectPivot -- Index of the largest-magnitude radiant component. maxloc
+! returns the FIRST maximum, so ties break to the lowest index.
 ! -----------------------------------------------------------------------
 pure function SelectPivot(radiant) result(k)
     real(real64), intent(in) :: radiant(3)
@@ -104,9 +96,8 @@ end function SelectPivot
 
 ! -----------------------------------------------------------------------
 ! Reconstruct -- Rebuild the point P and radiant R from the 4 free
-! parameters q under the
-! pivot chart (R's Reconstruct): the pinned component
-! gets R[k] = 1 and P[k] = pointFixed, the two free components take q.
+! parameters q under the pivot chart: the pinned component gets R[k] = 1
+! and P[k] = pointFixed, the two free components take q.
 ! -----------------------------------------------------------------------
 pure subroutine Reconstruct(q, k, pointFixed, P, R)
     real(real64), intent(in) :: q(NQ)
@@ -129,9 +120,8 @@ end subroutine Reconstruct
 
 ! -----------------------------------------------------------------------
 ! EmCrossU -- g = e_m x u, the cross product of the m-th unit axis with
-! the sight
-! direction (R's emCrossU). Used by the analytic
-! gradient's radiant-ratio terms.
+! the sight direction. Used by the analytic gradient's radiant-ratio
+! terms.
 ! -----------------------------------------------------------------------
 pure subroutine EmCrossU(m, ux, uy, uz, g)
     integer(int32), intent(in) :: m
@@ -150,12 +140,11 @@ end subroutine EmCrossU
 
 ! -----------------------------------------------------------------------
 ! BorovickaLineDistance -- Signed line-to-line distance between the
-! trajectory (point P, direction R)
-! and the sight (station S, unit direction u), Borovicka eq. 5. Scale- and
-! translation-gauge invariant: unchanged under R -> kR and P -> P + sR.
-! Returns the large finite PARALLEL_SENTINEL (never Inf/NaN) when the lines
-! are parallel, so the squared cost stays finite. Mirrors R's
-! lineDistanceKernel.
+! trajectory (point P, direction R) and the sight (station S, unit
+! direction u), Borovicka eq. 5. Scale- and translation-gauge invariant:
+! unchanged under R -> kR and P -> P + sR. Returns the large finite
+! PARALLEL_SENTINEL (never Inf/NaN) when the lines are parallel, so the
+! squared cost stays finite.
 ! -----------------------------------------------------------------------
 pure function BorovickaLineDistance(P, R, S, u) result(d)
     real(real64), intent(in) :: P(3), R(3), S(3), u(3)
@@ -176,14 +165,14 @@ end function BorovickaLineDistance
 
 ! -----------------------------------------------------------------------
 ! BorovickaFF4Cost -- FF4 cost: weighted sum of squared line distances
-! over all sights. This is
-! the SCALAR per-point accumulation loop (R's FF4scalarRef) --
-! deliberately NOT a vectorized re-association, so
-! the optimiser minimum matches R's (which shifts ~1e-8 under sum-reorder).
-! A parallel sight contributes PARALLEL_SENTINEL^2 = 1e150.
+! over all sights. This is the SCALAR per-point accumulation loop,
+! deliberately not a vectorized re-association: the converged minimum
+! shifts ~1e-8 under sum reordering. A parallel sight contributes
+! PARALLEL_SENTINEL^2 = 1e150.
 ! -----------------------------------------------------------------------
-subroutine BorovickaFF4Cost(nStations, stations, nPoints, stIdx, ux, uy, uz, w, &
-        q, k, pointFixed, cost)
+subroutine BorovickaFF4Cost(&
+    nStations, stations, nPoints, stIdx, ux, uy, uz, w, q, k, pointFixed, cost &
+)
     integer(int32), intent(in) :: nStations, nPoints
     real(real64), intent(in) :: stations(3, nStations)
     integer(int32), intent(in) :: stIdx(nPoints)
@@ -211,13 +200,14 @@ end subroutine BorovickaFF4Cost
 ! -----------------------------------------------------------------------
 ! BorovickaFF4Grad -- Closed-form gradient of FF4 w.r.t. the 4 free
 ! parameters q, accumulated as
-! a scalar per-point loop (R's gradientFF4). Shares
+! a scalar per-point loop. Shares
 ! FF4's near-parallel mask: a masked sight gets weight 0 and b = 1, so the
 ! 1/b, 1/b^3 terms never produce Inf/NaN and the row contributes nothing.
 ! grad = (d/dP[free1], d/dP[free2], d/dR[free1], d/dR[free2]).
 ! -----------------------------------------------------------------------
-subroutine BorovickaFF4Grad(nStations, stations, nPoints, stIdx, ux, uy, uz, w, &
-        q, k, pointFixed, grad)
+subroutine BorovickaFF4Grad(&
+    nStations, stations, nPoints, stIdx, ux, uy, uz, w, q, k, pointFixed, grad &
+)
     integer(int32), intent(in) :: nStations, nPoints
     real(real64), intent(in) :: stations(3, nStations)
     integer(int32), intent(in) :: stIdx(nPoints)
@@ -285,9 +275,8 @@ end subroutine BorovickaFF4Grad
 
 ! -----------------------------------------------------------------------
 ! OnBound -- True if either free radiant ratio sits within ONBOUND_TOL of
-! +/-RAD_BOUND
-! (R's onBound) -- the pathological case that triggers a
-! one-shot re-pivot.
+! +/-RAD_BOUND -- the pathological case that triggers a one-shot
+! re-pivot.
 ! -----------------------------------------------------------------------
 pure function OnBound(q) result(res)
     real(real64), intent(in) :: q(NQ)
@@ -299,16 +288,18 @@ end function OnBound
 
 ! -----------------------------------------------------------------------
 ! BorovickaFitOnce -- One L-BFGS-B minimisation of FF4 under box bounds
-! (R's fitOnce). Bounds:
+! Bounds:
 ! the point-free parameters are q0(1:2) +/- 1
 ! Mm, the radiant ratios +/-RAD_BOUND. The reverse-communication driver and
-! convergence-code mapping mirror MTExpFit.f90 / R's src/appl/lbfgsb.c:
+! convergence-code mapping match MTExpFit:
 !   0 converged, 1 iteration limit, 51 warning, 52 abnormal/other.
 ! status is 0 when the optimiser ran, 1 when it could not be started at all.
 ! Stateless: all L-BFGS-B working storage is local to this call.
 ! -----------------------------------------------------------------------
-subroutine BorovickaFitOnce(nStations, stations, nPoints, stIdx, ux, uy, uz, w, &
-        k, pointFixed, q0, maxit, lmm, factr, pgtol, qout, convergence, status)
+subroutine BorovickaFitOnce(&
+    nStations, stations, nPoints, stIdx, ux, uy, uz, w, k, pointFixed, q0, maxit, lmm, factr, &
+    pgtol, qout, convergence, status &
+)
     integer(int32), intent(in) :: nStations, nPoints
     real(real64), intent(in) :: stations(3, nStations)
     integer(int32), intent(in) :: stIdx(nPoints)
@@ -358,7 +349,7 @@ subroutine BorovickaFitOnce(nStations, stations, nPoints, stIdx, ux, uy, uz, w, 
         return
     end if
 
-    ! Box bounds (R's fitOnce): point-free +/-1 Mm about the seed, ratios +/-5.
+    ! Point-free parameters are bounded +/-1 Mm about the seed, ratios +/-5.
     lower(1) = q0(1) - 1.0_real64
     upper(1) = q0(1) + 1.0_real64
     lower(2) = q0(2) - 1.0_real64
@@ -373,19 +364,22 @@ subroutine BorovickaFitOnce(nStations, stations, nPoints, stIdx, ux, uy, uz, w, 
     iter = 0
     task = 'START'
 
-    ! Reverse-communication loop, mirroring R's src/appl/lbfgsb.c driver.
+    ! Reverse-communication loop.
     do
-        call setulb(NQ, lmm, qout, lower, upper, nbd, f, g, factr, &
-            pgtol, wa, iwa, task, IPRINT, csave, lsave, isave, dsave)
+        call setulb(&
+            NQ, lmm, qout, lower, upper, nbd, f, g, factr, pgtol, wa, iwa, task, IPRINT, csave, &
+            lsave, isave, dsave &
+        )
 
         if (task(1:2) == 'FG') then
-            call BorovickaFF4Cost(nStations, stations, nPoints, stIdx, &
-                ux, uy, uz, w, qout, k, pointFixed, f)
-            call BorovickaFF4Grad(nStations, stations, nPoints, stIdx, &
-                ux, uy, uz, w, qout, k, pointFixed, g)
+            call BorovickaFF4Cost(&
+                nStations, stations, nPoints, stIdx, ux, uy, uz, w, qout, k, pointFixed, f &
+            )
+            call BorovickaFF4Grad(&
+                nStations, stations, nPoints, stIdx, ux, uy, uz, w, qout, k, pointFixed, g &
+            )
         else if (task(1:5) == 'NEW_X') then
-            ! Callers must pass maxit=300, NOT R's 100: vendored 3.0's corrected
-            ! epsmch makes the factr stop stricter (see the module header).
+            ! Callers must pass maxit = 300 (see the module header).
             iter = iter + 1
             if (iter > maxit) then
                 convergence = 1
@@ -408,7 +402,7 @@ subroutine BorovickaFitOnce(nStations, stations, nPoints, stIdx, ux, uy, uz, w, 
 end subroutine BorovickaFitOnce
 
 ! -----------------------------------------------------------------------
-! BorovickaMinimize4 -- The full per-sample solver (R's minimize4). Charts on
+! BorovickaMinimize4 -- The full per-sample solver. Charts on
 ! the seed radiant's argmax pivot, fits, and -- if a bound is active -- re-
 ! pivots once onto the fitted radiant's argmax and refits. Any non-
 ! convergence, a still-bound-active or same-pivot re-pivot, an all-zero or
@@ -421,9 +415,10 @@ end subroutine BorovickaFitOnce
 ! (bad sizes, an out-of-range station index, or an L-BFGS-B workspace
 ! allocation failure).
 ! -----------------------------------------------------------------------
-subroutine BorovickaMinimize4(nStations, stations, nPoints, stIdx, ux, uy, uz, w, &
-        seedPoint, seedRadiant, maxit, lmm, factr, pgtol, &
-        outRadiant, outPoint, converged, status)
+subroutine BorovickaMinimize4(&
+    nStations, stations, nPoints, stIdx, ux, uy, uz, w, seedPoint, seedRadiant, maxit, lmm, &
+    factr, pgtol, outRadiant, outPoint, converged, status &
+)
     use, intrinsic :: ieee_arithmetic, only : ieee_value, ieee_quiet_nan, &
         ieee_is_finite
     integer(int32), intent(in) :: nStations, nPoints
@@ -484,8 +479,10 @@ subroutine BorovickaMinimize4(nStations, stations, nPoints, stIdx, ux, uy, uz, w
     q0(3) = seedRadiant(f1) / seedRadiant(k)
     q0(4) = seedRadiant(f2) / seedRadiant(k)
 
-    call BorovickaFitOnce(nStations, stations, nPoints, stIdx, ux, uy, uz, w, &
-        k, pointFixed, q0, maxit, lmm, factr, pgtol, qfit, conv, stat)
+    call BorovickaFitOnce(&
+        nStations, stations, nPoints, stIdx, ux, uy, uz, w, k, pointFixed, q0, maxit, lmm, factr, &
+        pgtol, qfit, conv, stat &
+    )
     if (stat /= 0) then
         status = 1
         return
@@ -508,8 +505,10 @@ subroutine BorovickaMinimize4(nStations, stations, nPoints, stIdx, ux, uy, uz, w
         q0(3) = R(f1) / R(k2)
         q0(4) = R(f2) / R(k2)
 
-        call BorovickaFitOnce(nStations, stations, nPoints, stIdx, ux, uy, uz, w, &
-            k2, pf2, q0, maxit, lmm, factr, pgtol, qfit, conv, stat)
+        call BorovickaFitOnce(&
+            nStations, stations, nPoints, stIdx, ux, uy, uz, w, k2, pf2, q0, maxit, lmm, factr, &
+            pgtol, qfit, conv, stat &
+        )
         if (stat /= 0) then
             status = 1
             return

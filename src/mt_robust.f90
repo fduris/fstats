@@ -1,54 +1,29 @@
 ! =======================================================================
-! MTRobust -- Native Theil-Sen and Siegel repeated-median robust linear
-! fits, replacing
-! R's `mblm` package (Median-Based Linear Models) used throughout
-! `source_scripts/fitSpeed.r` (mblm(y~x), mblm(..., repeated=TRUE), and its
-! `summary` read by `mblm2list`).
+! MTRobust -- Theil-Sen and Siegel repeated-median robust linear fits.
 !
-! ------------------------------------------------------------------------
-! Pinned mblm semantics (read from the installed package, not assumed):
-!   Rscript -e 'library(mblm); print(mblm); print(getS3method("summary","mblm"))'
+! Both estimate a straight line y = intercept + slope*x from medians of
+! pairwise quantities, so a minority of grossly wrong points cannot drag
+! the fit. Only pairs with distinct abscissae contribute.
 !
-! (a) DEFAULT of `repeated`: mblm's formal is `mblm(formula, dataframe,
-!     repeated = TRUE)`, so the bare `mblm(y~x)` in fitSpeed.r uses
-!     repeated=TRUE -> the SIEGEL repeated-median estimator. Other call
-!     sites also pass repeated=TRUE explicitly. The app therefore only ever uses
-!     Siegel; Theil-Sen (repeated=FALSE) is provided for completeness.
+!   Theil-Sen
+!     slope     = median over pairs i<j of (y_j - y_i)/(x_j - x_i)
+!     intercept = median over k of (y_k - slope*x_k)
 !
-! (b) Coefficient definitions (mblm sorts by x first; because both estimators
-!     reduce to order-independent medians of symmetric pairwise quantities,
-!     the sort does not change the result, so it is omitted here):
-!     * Theil-Sen (repeated=FALSE):
-!         slope     = median over pairs i<j with x_j /= x_i of
-!                     (y_j - y_i)/(x_j - x_i)
-!         intercept = median over k of (y_k - slope*x_k)
-!     * Siegel (repeated=TRUE):
-!         for each point i: smedian_i = median over j /= i (x_j /= x_i) of
-!                     (y_j - y_i)/(x_j - x_i)
-!                           imedian_i = median over j /= i (x_j /= x_i) of
-!                     (x_j*y_i - x_i*y_j)/(x_j - x_i)   [line through i,j]
-!         slope     = median_i(smedian_i)
-!         intercept = median_i(imedian_i)
+!   Siegel (repeated median, the estimator the speed fit uses)
+!     per point i, over partners j /= i:
+!       smedian_i = median of (y_j - y_i)/(x_j - x_i)
+!       imedian_i = median of (x_j*y_i - x_i*y_j)/(x_j - x_i)
+!     slope     = median_i(smedian_i)
+!     intercept = median_i(imedian_i)
 !
-! (c) summary.mblm coefficient SEs and sigma (what mblm2list reads):
-!     * sigma = summary$sigma = sqrt( sum(residuals^2) / (n - 2) ), with
-!       residuals = y - slope*x - intercept and rdf = df.residual = n - 2.
-!       (This is the residual-standard-error form, NOT a MAD.)
-!     * The coefficient-error column mblm2list reads (summary$coefficients[,2])
-!       is the "MAD" column: c(mad(z$intercepts), mad(z$slopes)) where R's
-!       mad(v) = 1.4826 * median(|v - median(v)|). The vectors z$slopes /
-!       z$intercepts are the estimator's own working medians:
-!         repeated=FALSE: z$slopes = all pairwise slopes,
-!                         z$intercepts = y - slope*x (per point)
-!         repeated=TRUE : z$slopes = smedian_i, z$intercepts = imedian_i
-!       so seSlope = mad(<slope vector>), seIntercept = mad(<intercept
-!       vector>). These are Wilcoxon/MAD statistics, not OLS standard errors.
-!     (summary.mblm's V value / Pr(>|V|) columns are unused by mblm2list and
-!     are not reproduced.)
+! Both report sigma = sqrt(sum(residuals^2)/(n-2)) and, as the per-
+! coefficient error, the MAD of the estimator's own working vector: the
+! pairwise slopes and per-point intercepts for Theil-Sen, the two
+! per-point median vectors for Siegel. Those are MAD statistics, not OLS
+! standard errors.
 !
-! R's median: for m values sorted ascending, the middle one when m is odd and
-! the mean of the two central ones when m is even -- replicated in MedianOf.
-! ------------------------------------------------------------------------
+! Stateless: no SAVE, no module variables, all working storage local or
+! caller-passed.
 ! =======================================================================
 module MTRobust
 
@@ -60,18 +35,16 @@ private
 public :: TheilSenFit, SiegelFit
 
 ! Largest sample the Theil-Sen estimator accepts, enforced by the
-! ComputeTheilSenFit export. The estimator is defined over ALL n(n-1)/2 pairwise
-! slopes and its MAD needs them materialised, so its memory is inherently
-! quadratic: 4096 points is 8.4e6 pairs, a 67 MB buffer. That is the honest
-! bound -- the general MAX_TRAIL_LENGTH of 100000 would be 5e9 pairs (40 GB) and
-! could never run. Siegel (O(n) storage) is unaffected and keeps the general
-! bound.
+! ComputeTheilSenFit export. All n(n-1)/2 pairwise slopes must be
+! materialised for the MAD, so storage is quadratic: 4096 points is 8.4e6
+! pairs, a 67 MB buffer. Siegel needs only O(n) and keeps the general
+! trail bound.
 integer(int32), parameter, public :: MAX_THEILSEN_LENGTH = 4096
 
 contains
 
 ! -----------------------------------------------------------------------
-! ResidualSigma -- summary.mblm$sigma = sqrt( sum(residuals^2) / (n - 2) ).
+! ResidualSigma -- sqrt( sum(residuals^2) / (n - 2) ).
 ! Precondition: n >= 3, so the denominator is positive.
 ! -----------------------------------------------------------------------
 pure function ResidualSigma(n, x, y, slope, intercept) result(sigma)
@@ -86,26 +59,22 @@ pure function ResidualSigma(n, x, y, slope, intercept) result(sigma)
 end function ResidualSigma
 
 ! -----------------------------------------------------------------------
-! TheilSenFit -- mblm(y~x, repeated=FALSE). Preconditions: 3 <= n <=
-! MAX_THEILSEN_LENGTH and
-! not all x equal (guaranteed by the caller); the pairwise loop then yields
-! >= 1 slope. `status` is 0 on success and 1 if the pairwise-slope buffer
-! could not be allocated.
+! TheilSenFit -- Theil-Sen fit, defined in the module header.
+!
+! Preconditions, guaranteed by the caller: 3 <= n <= MAX_THEILSEN_LENGTH
+! and not all x equal, so the pairwise loop yields at least one slope.
+! `status` is 0 on success, 1 if the pairwise-slope buffer could not be
+! allocated.
 ! -----------------------------------------------------------------------
-subroutine TheilSenFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, &
-        status)
+subroutine TheilSenFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, status)
     integer(int32), intent(in) :: n
     real(real64), intent(in) :: x(n), y(n)
     real(real64), intent(out) :: slope, intercept, sigma, seSlope, seIntercept
     integer(int32), intent(out) :: status
 
-    ! The pairwise-slope buffer is ALLOCATABLE, not automatic: at the documented
-    ! maximum it is 67 MB, which would overflow any ordinary thread stack. The
-    ! pair count is formed in int64 because n*(n-1) overflows a 32-bit integer
-    ! above n = 65536 -- as an automatic array bound that silently produced a
-    ! wrapped, meaningless extent (n = 70000 asked for 302,481,352 elements
-    ! instead of 2,449,965,000) and, for wraps that land negative, a zero-size
-    ! array written far out of bounds.
+    ! Allocatable, not automatic: at the maximum n this is 67 MB, which would
+    ! overflow an ordinary thread stack. The pair count is int64 because
+    ! n*(n-1) overflows int32 above n = 65536.
     real(real64), allocatable :: slopes(:)
     real(real64), allocatable :: intercepts(:)
     integer(int64) :: npair
@@ -143,10 +112,8 @@ subroutine TheilSenFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, &
 
     sigma = ResidualSigma(n, x, y, slope, intercept)
 
-    ! MAD columns read by mblm2list: on the pairwise slopes and the per-point
-    ! intercepts respectively (see the semantics block above). mad's own centre is
-    ! median(<vector>), i.e. exactly the estimate just computed, so `slopes` can be
-    ! consumed in place rather than copied a second time.
+    ! Each MAD centres on the estimate just computed, so both working vectors
+    ! are consumed in place rather than copied.
     call MadInplace(slopes(1:ns), ns, slope, seSlope)
     seIntercept = MadOf(intercepts, n)
 
@@ -154,16 +121,15 @@ subroutine TheilSenFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, &
 end subroutine TheilSenFit
 
 ! -----------------------------------------------------------------------
-! SiegelFit -- mblm(y~x, repeated=TRUE). Precondition: n >= 3 and not all
-! x equal
-! (guaranteed by the caller); every point then has >= 1 partner with
-! distinct x, so each per-point median is defined. Storage is O(n) -- only
-! the per-point medians are materialised, never the full pair set -- so this
-! estimator keeps the general MAX_TRAIL_LENGTH bound. `status` is 0 on
-! success and 1 if the working buffers could not be allocated.
+! SiegelFit -- Siegel repeated-median fit, defined in the module header.
+!
+! Preconditions, guaranteed by the caller: n >= 3 and not all x equal, so
+! every point has at least one partner with distinct x and each per-point
+! median is defined. Only the per-point medians are materialised, never
+! the full pair set, so storage is O(n). `status` is 0 on success, 1 if
+! the working buffers could not be allocated.
 ! -----------------------------------------------------------------------
-subroutine SiegelFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, &
-        status)
+subroutine SiegelFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, status)
     integer(int32), intent(in) :: n
     real(real64), intent(in) :: x(n), y(n)
     real(real64), intent(out) :: slope, intercept, sigma, seSlope, seIntercept
@@ -205,9 +171,8 @@ subroutine SiegelFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, &
 
     sigma = ResidualSigma(n, x, y, slope, intercept)
 
-    ! MAD columns read by mblm2list: on the per-point median vectors. Their mad
-    ! centres are the estimates just computed, so both vectors are consumed in
-    ! place.
+    ! Each MAD centres on the estimate just computed, so both vectors are
+    ! consumed in place.
     call MadInplace(smedians, n, slope, seSlope)
     call MadInplace(imedians, n, intercept, seIntercept)
 

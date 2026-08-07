@@ -3,8 +3,8 @@
 This directory contains the reference implementation of the L-BFGS-B
 bound-constrained limited-memory quasi-Newton optimizer, vendored into
 libfstats so the native exp-model fit (`ComputeExpFitLBFGSB`, see
-`../mt_expfit.f90` and `../../mt/mt_fstats.f90`) no longer needs R's
-`optim(method="L-BFGS-B")`.
+`../mt_expfit.f90` and `../../mt/mt_fstats.f90`) has a bound-constrained
+optimizer to build on.
 
 ## Provenance
 
@@ -64,7 +64,7 @@ conditions through the normal reverse-communication path. Every other
   linked BLAS. (`dnrm2` is not referenced by lbfgsb.f.)
 - The drivers, Makefile, PDFs, and sample outputs from the tarball.
 - **netlib PORT `dn2gb` (bounded NL2SOL).** The native bounded exp-model fit
-  (`ComputeExpFitPort`) replaces R's `nls(algorithm="port")`. The intended
+  (`ComputeExpFitPort`) needed a bounded least-squares solver. The intended
   vendor source was netlib's `dn2gb` (double-precision NL2SOL with simple
   bounds) from <https://netlib.org/port/>. It was **declined on licensing
   grounds**: unlike the unbounded NL2SOL (TOMS Algorithm 573, whose

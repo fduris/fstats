@@ -1,39 +1,20 @@
 ! =======================================================================
-! MTLoess -- Native loess (locally-weighted polynomial regression) matching R's
-! loess(..., family="gaussian") with surface="direct", used to replace R's
-! loess() in the plot overlays and the light-mass/speed loess columns.
+! MTLoess -- Locally-weighted polynomial regression (loess), evaluating an
+! exact local fit at every input abscissa.
 !
-! This is the DOCUMENTED FALLBACK; the primary netlib dloess vendor
-! path was declined. dloess' AT&T Bell Labs license IS permissive ("Permission
-! to use, copy, modify, and distribute this software for any purpose without
-! fee is hereby granted ...", Copyright (c) 1989, 1992 by AT&T), so the license
-! gate passes -- but its Fortran core loessf.f FAILS the statelessness gate:
-! 29 SAVE statements (per-subroutine execution counters `execnt`, initialised
-! once via DATA and incremented every call, never reset; machine constants
-! `machin`/`machep` computed only on the first call, `if(execnt.eq.1)`, and
-! cached via SAVE for every later call). None are per-call-reinitialised, so
-! the spec's stateless-only rule rules the vendor out. Reproducing R's loess()
-! would additionally need the C driver stack (loess.c/loessc.c/predict.c: the
-! kd-tree interpolation surface), out of scope for this Fortran-only library.
-! The fit is therefore done directly here, exactly as R's surface="direct".
+! Per evaluation abscissa x_i, with no robustness iterations:
+!   q     = min(n, floor(span*n + Q_TOL))   neighbourhood size
+!   dmax  = the q-th smallest |x_j - x_i|   bandwidth
+!   w_j   = (1 - (|x_j-x_i|/dmax)^3)^3 for |x_j-x_i| < dmax, else 0
+! then a weighted polynomial of the requested degree is fitted in the
+! CENTRED abscissa (x_j - x_i) by weighted least squares. Centring makes
+! the intercept the fitted value AT x_i, so no re-evaluation is needed.
+! When q = n the farthest neighbour sits at d = dmax and gets weight
+! exactly 0 via (1 - 1^3)^3.
 !
-! Algorithm, per evaluation abscissa x_i (family="gaussian" => NO robustness
-! iterations; a single weighted fit):
-!   q     = min(n, floor(span*n + Q_TOL))      neighbourhood size
-!   dmax  = the q-th smallest |x_j - x_i|       bandwidth (q-th nearest neighbour)
-!   w_j   = (1 - (|x_j-x_i|/dmax)^3)^3   for |x_j-x_i| < dmax, else 0   (tricube)
-! then fit a weighted polynomial of the requested `degree` (1 or 2) in the
-! CENTRED abscissa (x_j - x_i) by weighted least squares; the fitted value at
-! x_i is the intercept coefficient (centring makes the intercept the fit AT
-! x_i, so no re-evaluation is needed). When q = n the farthest neighbour sits
-! at d = dmax and receives weight exactly 0 via (1 - 1^3)^3.
-!
-! Reproduces R's surface="direct" to ~1e-13 on the goldens (span 0.6 /
-! 0.35 / 1.0, degree 1 and 2, and a duplicate-abscissa set). It differs from
-! R's DEFAULT surface="interpolate" only by interpolation on R's kd-tree cells;
-! that difference is bounded well under 5e-4*sd(y) on the goldens. Stateless:
-! no SAVE, no module state, no I/O; all working
-! storage is local to the call.
+! Fitting each point directly, rather than interpolating a surface over
+! kd-tree cells, is what keeps this stateless: no SAVE, no module state,
+! no I/O, all working storage local to the call.
 ! =======================================================================
 module MTLoess
 
@@ -44,33 +25,28 @@ private
 
 public :: LoessFit
 
-! Rounding tolerance added before truncating span*n to the neighbourhood size,
-! matching the `floor(n*span + 1e-5)` of R's loess_workspace (loessc.c). It is
-! NOT cosmetic: span*n is generally inexact in binary, so a bare floor drops a
-! whole neighbour whenever the product lands a hair below an integer -- e.g.
-! span = 0.35, n = 180 gives 62.99999999999999 and hence q = 62 where R uses
-! 63. That one neighbour moved the fitted values by 1.6e-3 * sd(y), three times
-! the interpolate-vs-direct bound quoted above. Affected (span, n) pairs are
-! ordinary ones (span 0.35 with n = 180/340/360, span 0.7 with n = 90/170/180/
-! 330..360), so this tolerance is required for R parity, not just tidiness.
+! Rounding tolerance added before truncating span*n to the neighbourhood
+! size. Not cosmetic: span*n is generally inexact in binary, so a bare
+! floor drops a whole neighbour whenever the product lands a hair below an
+! integer -- span 0.35 with n = 180 gives 62.99999999999999, hence q = 62
+! where 63 is intended. That one neighbour moves the fitted values by
+! 1.6e-3 * sd(y). Ordinary (span, n) pairs are affected, so the tolerance
+! is required for correctness.
 real(real64), parameter :: Q_TOL = 1.0e-5_real64
 
 contains
 
 ! -----------------------------------------------------------------------
 ! LoessFit -- Direct-surface loess of `y` on `x` at the input abscissae.
-! `degree` is 1
-! or 2; `span` in (0, 1] selects the neighbourhood fraction (a span above 1
-! is clamped to the full sample by the q = min(n, ...) below, which is NOT
-! R's alpha > 1 bandwidth inflation -- the ComputeLoessFit export documents
-! (0, 1] as the supported range). On return `ys`
-! holds the fitted values and `status` is 0 (computed) or 2 (a local
-! neighbourhood was degenerate: fewer than degree+1 positive-weight points,
-! all-coincident abscissae in the neighbourhood, or a singular weighted
-! normal matrix). R degrades such a neighbourhood to a pseudo-inverse with a
-! warning; this routine instead surfaces status=2 rather than emit an
-! unreliable smoothed value. Preconditions (n >= 1, degree in {1,2},
-! span > 0) are enforced by the ComputeLoessFit export.
+! `degree` is 1 or 2; `span` in (0, 1] selects the neighbourhood
+! fraction, a span above 1 being clamped to the full sample by the q =
+! min(n, ...) below. On return `ys` holds the fitted values and `status`
+! is 0 (computed) or 2 (a local neighbourhood was degenerate: fewer than
+! degree+1 positive-weight points, all-coincident abscissae in the
+! neighbourhood, or a singular weighted normal matrix). Such a
+! neighbourhood surfaces status=2 rather than an unreliable smoothed
+! value. Preconditions (n >= 1, degree in {1,2}, span > 0) are enforced
+! by the ComputeLoessFit export.
 ! -----------------------------------------------------------------------
 subroutine LoessFit(n, x, y, span, degree, ys, status)
     external :: dposv   ! LAPACK SPD solve (resolved via the linked liblapack)
@@ -90,7 +66,6 @@ subroutine LoessFit(n, x, y, span, degree, ys, status)
 
     ! Neighbourhood size q = min(n, floor(span*n + Q_TOL)); q >= p is needed for
     ! a determined local polynomial (the per-point npos check below enforces it).
-    ! The Q_TOL before the floor is R's (see the module header).
     q = min(n, int(floor(span * real(n, real64) + Q_TOL), int32))
     if (q < 1) then
         status = 2

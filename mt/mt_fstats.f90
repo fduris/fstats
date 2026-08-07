@@ -48,9 +48,9 @@ subroutine ComputeLowessFit(x, y, ys, n, fsmooth, nstps) bind(C, name="ComputeLo
 
 end subroutine ComputeLowessFit
 
-subroutine ComputeExpFitLBFGSB(x, y, n, seed, lower, upper, maxit, lmm, &
-        factr, pgtol, coef, fval, convergence, status) &
-        bind(C, name="ComputeExpFitLBFGSB")
+subroutine ComputeExpFitLBFGSB(&
+    x, y, n, seed, lower, upper, maxit, lmm, factr, pgtol, coef, fval, convergence, status &
+) bind(C, name="ComputeExpFitLBFGSB")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use iso_fortran_env, only : real64, int32
     use MTExpFit, only : ExpFitLBFGSB
@@ -79,7 +79,7 @@ subroutine ComputeExpFitLBFGSB(x, y, n, seed, lower, upper, maxit, lmm, &
     real(c_double), intent(out), dimension(1:4) :: coef
     ! Sum of squared residuals at the fitted parameters.
     real(c_double), intent(out) :: fval
-    ! R-optim convergence code: 0 converged, 1 iter limit, 51 warning,
+    ! Convergence code: 0 converged, 1 iter limit, 51 warning,
     ! 52 abnormal/other.
     integer(c_int), intent(out) :: convergence
     ! 0 if the optimizer ran; 1 if it could not be started (invalid
@@ -106,16 +106,18 @@ subroutine ComputeExpFitLBFGSB(x, y, n, seed, lower, upper, maxit, lmm, &
     scopedX = x(1:n)
     scopedY = y(1:n)
 
-    call ExpFitLBFGSB(n, scopedX, scopedY, seed, lower, upper, &
-        maxit, lmm, factr, pgtol, coef, fval, convergence, status)
+    call ExpFitLBFGSB(&
+        n, scopedX, scopedY, seed, lower, upper, maxit, lmm, factr, pgtol, coef, fval, &
+        convergence, status &
+    )
 
     deallocate(scopedX, scopedY)
 
 end subroutine ComputeExpFitLBFGSB
 
-subroutine ComputeExpFitGN(x, y, n, seed, maxit, tol, minFactor, &
-        coef, se, sigma, convergence, status) &
-        bind(C, name="ComputeExpFitGN")
+subroutine ComputeExpFitGN(&
+    x, y, n, seed, maxit, tol, minFactor, coef, se, sigma, convergence, status &
+) bind(C, name="ComputeExpFitGN")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use iso_fortran_env, only : real64, int32
     use MTExpFit, only : ExpFitGaussNewton
@@ -128,12 +130,11 @@ subroutine ComputeExpFitGN(x, y, n, seed, maxit, tol, minFactor, &
     integer(c_int), intent(in) :: n
     ! Initial guess for (a0, aa, bb, cc).
     real(c_double), intent(in), dimension(1:4) :: seed
-    ! Maximum number of Gauss-Newton iterations (R nls.control maxiter).
+    ! Maximum number of Gauss-Newton iterations.
     integer(c_int), intent(in) :: maxit
-    ! Relative-offset convergence tolerance (R nls.control tol).
+    ! Relative-offset convergence tolerance.
     real(c_double), intent(in) :: tol
-    ! Minimum step-halving factor before declaring non-convergence
-    ! (R nls.control minFactor).
+    ! Minimum step-halving factor before declaring non-convergence.
     real(c_double), intent(in) :: minFactor
     ! Fitted (a0, aa, bb, cc) on return (the last iterate on non-convergence).
     real(c_double), intent(out), dimension(1:4) :: coef
@@ -166,8 +167,9 @@ subroutine ComputeExpFitGN(x, y, n, seed, maxit, tol, minFactor, &
     scopedX = x(1:n)
     scopedY = y(1:n)
 
-    call ExpFitGaussNewton(n, scopedX, scopedY, seed, maxit, tol, minFactor, &
-        coef, se, sigma, convergence, status)
+    call ExpFitGaussNewton(&
+        n, scopedX, scopedY, seed, maxit, tol, minFactor, coef, se, sigma, convergence, status &
+    )
 
     deallocate(scopedX, scopedY)
 
@@ -175,17 +177,13 @@ end subroutine ComputeExpFitGN
 
 ! -----------------------------------------------------------------------
 ! ComputeExpFitPort -- Bounded exp-deceleration model fit, the native
-! replacement for R's
-! nls(algorithm="port") in fitSpeed.r. The netlib PORT `dn2gb` vendor path
-! was declined on licensing grounds (the PORT library is AT&T Bell Labs
-! 1984, free for non-commercial use only, and this repository ships
-! binaries), so the fit is a PROJECTED Gauss-Newton substitute: the same
-! analytic-Jacobian Gauss-Newton as ComputeExpFitGN, with every trial step
-! clamped into the box [lower, upper]. Stateless.
+! bounded exp-deceleration fit: the same analytic-Jacobian Gauss-Newton as
+! ComputeExpFitGN, with every trial step clamped into the box
+! [lower, upper]. Stateless.
 ! -----------------------------------------------------------------------
-subroutine ComputeExpFitPort(x, y, n, seed, lower, upper, maxit, tol, &
-        coef, se, sigma, convergence, status) &
-        bind(C, name="ComputeExpFitPort")
+subroutine ComputeExpFitPort(&
+    x, y, n, seed, lower, upper, maxit, tol, coef, se, sigma, convergence, status &
+) bind(C, name="ComputeExpFitPort")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use iso_fortran_env, only : real64, int32
     use MTExpFit, only : ExpFitGaussNewtonBounded
@@ -202,9 +200,9 @@ subroutine ComputeExpFitPort(x, y, n, seed, lower, upper, maxit, tol, &
     real(c_double), intent(in), dimension(1:4) :: lower
     ! Upper box bounds for (a0, aa, bb, cc).
     real(c_double), intent(in), dimension(1:4) :: upper
-    ! Maximum number of Gauss-Newton iterations (R nls.control maxiter).
+    ! Maximum number of Gauss-Newton iterations.
     integer(c_int), intent(in) :: maxit
-    ! Relative-offset convergence tolerance (R nls.control tol).
+    ! Relative-offset convergence tolerance.
     real(c_double), intent(in) :: tol
     ! Fitted (a0, aa, bb, cc) on return (the last iterate on non-convergence).
     real(c_double), intent(out), dimension(1:4) :: coef
@@ -220,8 +218,7 @@ subroutine ComputeExpFitPort(x, y, n, seed, lower, upper, maxit, tol, &
     ! maxit < 1, non-positive tol, or an empty box lower > upper).
     integer(c_int), intent(out) :: status
 
-    ! R's nls.control default minFactor (fitSpeed.r); baked in because the port
-    ! wrapper -- matching R's nls() call -- does not expose it as a knob.
+    ! Baked in because this wrapper does not expose minFactor as a knob.
     real(real64), parameter :: MINFACTOR = 1.0d0 / 1024.0d0
 
     real(real64), allocatable :: scopedX(:), scopedY(:)
@@ -241,15 +238,18 @@ subroutine ComputeExpFitPort(x, y, n, seed, lower, upper, maxit, tol, &
     scopedX = x(1:n)
     scopedY = y(1:n)
 
-    call ExpFitGaussNewtonBounded(n, scopedX, scopedY, seed, lower, upper, &
-        maxit, tol, MINFACTOR, coef, se, sigma, convergence, status)
+    call ExpFitGaussNewtonBounded(&
+        n, scopedX, scopedY, seed, lower, upper, maxit, tol, MINFACTOR, coef, se, sigma, &
+        convergence, status &
+    )
 
     deallocate(scopedX, scopedY)
 
 end subroutine ComputeExpFitPort
 
-subroutine ComputeTheilSenFit(x, y, n, slope, intercept, sigma, &
-        seSlope, seIntercept, status) bind(C, name="ComputeTheilSenFit")
+subroutine ComputeTheilSenFit(&
+    x, y, n, slope, intercept, sigma, seSlope, seIntercept, status &
+) bind(C, name="ComputeTheilSenFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use iso_fortran_env, only : real64, int32
     use MTRobust, only : TheilSenFit, MAX_THEILSEN_LENGTH
@@ -266,9 +266,9 @@ subroutine ComputeTheilSenFit(x, y, n, slope, intercept, sigma, &
     real(c_double), intent(out) :: intercept
     ! Residual standard error sqrt(sum(resid^2)/(n-2)).
     real(c_double), intent(out) :: sigma
-    ! MAD of the pairwise slopes (summary.mblm coefficient error).
+    ! MAD of the pairwise slopes (the coefficient error).
     real(c_double), intent(out) :: seSlope
-    ! MAD of the per-point intercepts (summary.mblm coefficient error).
+    ! MAD of the per-point intercepts (the coefficient error).
     real(c_double), intent(out) :: seIntercept
     ! 0 if the fit was computed; 1 if it could not be started (n < 3,
     ! n > MAX_THEILSEN_LENGTH, or a working-buffer allocation failure); 2 if the
@@ -287,7 +287,7 @@ subroutine ComputeTheilSenFit(x, y, n, slope, intercept, sigma, &
     ! n >= 3 keeps the sigma denominator (n-2) positive. The upper bound is
     ! MAX_THEILSEN_LENGTH, NOT the general MAX_TRAIL_LENGTH: this estimator is
     ! defined over all n(n-1)/2 pairwise slopes and has to materialise them, so
-    ! its cost is quadratic in memory and time. See MTRobust.f90.
+    ! its cost is quadratic in memory and time. See mt_robust.f90.
     if (n < 3 .or. n > MAX_THEILSEN_LENGTH) then
         status = 1
         return
@@ -305,15 +305,15 @@ subroutine ComputeTheilSenFit(x, y, n, slope, intercept, sigma, &
         return
     end if
 
-    call TheilSenFit(n, scopedX, scopedY, slope, intercept, sigma, &
-        seSlope, seIntercept, status)
+    call TheilSenFit(n, scopedX, scopedY, slope, intercept, sigma, seSlope, seIntercept, status)
 
     deallocate(scopedX, scopedY)
 
 end subroutine ComputeTheilSenFit
 
-subroutine ComputeSiegelFit(x, y, n, slope, intercept, sigma, &
-        seSlope, seIntercept, status) bind(C, name="ComputeSiegelFit")
+subroutine ComputeSiegelFit(&
+    x, y, n, slope, intercept, sigma, seSlope, seIntercept, status &
+) bind(C, name="ComputeSiegelFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use iso_fortran_env, only : real64, int32
     use MTRobust, only : SiegelFit
@@ -330,9 +330,9 @@ subroutine ComputeSiegelFit(x, y, n, slope, intercept, sigma, &
     real(c_double), intent(out) :: intercept
     ! Residual standard error sqrt(sum(resid^2)/(n-2)).
     real(c_double), intent(out) :: sigma
-    ! MAD of the per-point median slopes (summary.mblm coefficient error).
+    ! MAD of the per-point median slopes (the coefficient error).
     real(c_double), intent(out) :: seSlope
-    ! MAD of the per-point median intercepts (summary.mblm coefficient error).
+    ! MAD of the per-point median intercepts (the coefficient error).
     real(c_double), intent(out) :: seIntercept
     ! 0 if the fit was computed; 1 if it could not be started (n < 3,
     ! n > MAX_TRAIL_LENGTH, or a working-buffer allocation failure); 2 if the
@@ -363,8 +363,7 @@ subroutine ComputeSiegelFit(x, y, n, slope, intercept, sigma, &
         return
     end if
 
-    call SiegelFit(n, scopedX, scopedY, slope, intercept, sigma, &
-        seSlope, seIntercept, status)
+    call SiegelFit(n, scopedX, scopedY, slope, intercept, sigma, seSlope, seIntercept, status)
 
     deallocate(scopedX, scopedY)
 
@@ -373,10 +372,9 @@ end subroutine ComputeSiegelFit
 ! -----------------------------------------------------------------------
 ! ComputeOlsFit -- Ordinary least-squares polynomial fit with
 ! per-coefficient standard
-! errors, replacing R's lm() as used by fitSpeed.r. The design matrix is
-!   nCoef = 2 : [1, x]        (a plain linear fit, lm(y ~ x))
-!   nCoef = 3 : [1, x, x^2/2] (lm(y ~ x + I(x^2/2)), the halfSquaredTimes
-!               convention of quadFit at fitSpeed.r)
+! errors. The design matrix is
+!   nCoef = 2 : [1, x]        (a plain linear fit)
+!   nCoef = 3 : [1, x, x^2/2] (the half-squared-times convention)
 ! so the third column is x^2/2 -- NOT x^2. That factor of one half changes
 ! the third coefficient and its standard error, so this routine builds the
 ! design matrix explicitly rather than calling fstats' design_matrix (which
@@ -388,21 +386,14 @@ end subroutine ComputeSiegelFit
 ! Stateless: all working storage is local to this call.
 !
 ! RANK: covariance_matrix is an SVD PSEUDO-inverse, so it does not fail on a
-! rank-deficient design -- it quietly returns the minimum-norm solution. R's
-! lm is rank-aware instead (it aliases the redundant coefficient to NA and
-! uses n - rank residual d.o.f.), so the two disagree completely there: on a
-! constant-x design with n = 10, lm gives intercept 2.35 with the slope
-! dropped and 9 d.o.f., while the pseudo-inverse gives (0.235, 0.705) with
-! 8 d.o.f. and plausible-looking standard errors. Fitted VALUES agree, but
-! the split between coefficients is arbitrary and the SEs are meaningless.
-! Rather than reproduce lm's aliasing (this export returns a fixed-width
-! coefficient vector and has no way to signal "column dropped"), the design
-! is rank-tested up front from its singular values and a deficient one is
-! rejected with status = 2. Callers get a hard error instead of confident
-! nonsense.
+! rank-deficient design -- it quietly returns the minimum-norm solution,
+! whose fitted values are right but whose split between coefficients is
+! arbitrary and whose standard errors are meaningless. This export returns
+! a fixed-width coefficient vector and has no way to signal "column
+! dropped", so instead the design is rank-tested up front from its
+! singular values and a deficient one is rejected with status = 2.
 ! -----------------------------------------------------------------------
-subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) &
-        bind(C, name="ComputeOlsFit")
+subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) bind(C, name="ComputeOlsFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use iso_fortran_env, only : real64, int32
     use fstats_regression, only : covariance_matrix
@@ -436,8 +427,7 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) &
     real(real64), parameter :: zero = 0.0d0
     real(real64), parameter :: half = 0.5d0
     ! Relative singular-value floor for the rank test: a design is rank-deficient
-    ! when s(nCoef) <= RANK_TOL * s(1). Mirrors the role of lm.fit's `tol`
-    ! (1e-7, applied to its pivoted-QR diagonal) -- see the header.
+    ! when s(nCoef) <= RANK_TOL * s(1) -- see the header.
     real(real64), parameter :: RANK_TOL = 1.0d-7
 
     real(real64), allocatable :: a(:,:), cov(:,:), xty(:), coeffs(:)
@@ -455,8 +445,7 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) &
     sigma = zero
     status = 0
 
-    ! nCoef selects the design; only the linear and quadratic forms fitSpeed.r
-    ! uses are supported.
+    ! nCoef selects the design; only the linear and quadratic forms are supported.
     if (nCoef < 2 .or. nCoef > 3) then
         status = 1
         return
@@ -468,8 +457,10 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) &
         return
     end if
 
-    allocate(a(n, nCoef), cov(nCoef, nCoef), xty(nCoef), coeffs(nCoef), &
-        scopedX(n), scopedY(n), ymod(n), resid(n))
+    allocate(&
+        a(n, nCoef), cov(nCoef, nCoef), xty(nCoef), coeffs(nCoef), scopedX(n), scopedY(n), &
+        ymod(n), resid(n) &
+    )
 
     scopedX = x(1:n)
     scopedY = y(1:n)
@@ -487,8 +478,7 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) &
     call dgesvd('N', 'N', n, nCoef, asv, n, sval, udum, 1, vdum, 1, svq, -1, svinfo)
     svlwork = max(int(svq(1)), 1)
     allocate(svwork(svlwork))
-    call dgesvd('N', 'N', n, nCoef, asv, n, sval, udum, 1, vdum, 1, &
-        svwork, svlwork, svinfo)
+    call dgesvd('N', 'N', n, nCoef, asv, n, sval, udum, 1, vdum, 1, svwork, svlwork, svinfo)
     if (svinfo /= 0 .or. sval(1) <= zero .or. &
             sval(nCoef) <= RANK_TOL * sval(1)) then
         status = 2
@@ -514,7 +504,7 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) &
     resid = ymod - scopedY
 
     ! Residual standard error and coefficient standard errors, matching
-    ! summary.lm: var = SSR/(n - nCoef), se_i = sqrt(var * cov_ii).
+    ! var = SSR/(n - nCoef), se_i = sqrt(var * cov_ii).
     dof = n - nCoef
     ssr = sum(resid * resid)
     var = ssr / real(dof, real64)
@@ -530,34 +520,34 @@ end subroutine ComputeOlsFit
 
 ! -----------------------------------------------------------------------
 ! ComputeFTestPValue -- Nested-model F-test p-value, replacing
-! nestedFTestPValue in
-! fitSpeed.r. Given the residual sums of squares and residual
+! Given the residual sums of squares and residual
 ! degrees of freedom of a null (restricted) and an alternative (full)
 ! model, returns the upper-tail F probability
 !   p = pf(F, dfNull-dfAlt, dfAlt, lower.tail=FALSE)
 ! with F = ((rssNull-rssAlt)/(dfNull-dfAlt)) / (rssAlt/dfAlt), computed as a
 ! DIRECT upper tail from the regularized incomplete beta (see below), not as
-! 1 - CDF. The R edge cases are reproduced verbatim:
+! 1 - CDF. Edge cases:
 !   * dfAlt <= 0 or dfNull <= dfAlt -> status 1 (caller returns NA/NaN):
 !     the F statistic would have non-positive degrees of freedom.
 !   * non-finite rssAlt -> status 1: a rank-deficient alternative fit
 !     cannot be assessed (NA coefficients yield an NA RSS).
 !   * rssAlt <= 0 with rssNull > 0 -> p = 0: a perfect alternative fit is
 !     infinitely significant. When the null fit is ALSO perfect (or rssNull
-!     is NaN), R's F is 0/0 = NaN and pf() propagates it, so that corner is
-!     NA (status 1): two exact fits carry no evidence for the extra term,
+!     is NaN), F is 0/0 = NaN, so that corner is undefined (status 1):
+!     two exact fits carry no evidence for the extra term,
 !     and p = 0 would report infinite significance on none.
 !   * F <= 0 -> p = 1: the alternative model did not reduce the residual sum
 !     of squares (possible from roundoff when the extra term is worthless).
-!     R's pf() returns exactly 1 for a non-positive quantile; the beta
-!     argument below would be out of range, so this is handled up front.
-! rssNull is deliberately NOT guarded for finiteness, matching R: an NaN
-! rssNull gives an NaN F and hence NaN (R's NA), and an infinite rssNull
-! gives F = +Inf and hence p = 0 -- both exactly what pf() returns.
+!     The beta argument below would be out of range, so this is handled
+!     up front.
+! rssNull is deliberately NOT guarded for finiteness: an NaN rssNull gives
+! an NaN F and hence NaN, and an infinite rssNull gives F = +Inf and hence
+! p = 0.
 ! Stateless.
 ! -----------------------------------------------------------------------
-subroutine ComputeFTestPValue(rssNull, dfNull, rssAlt, dfAlt, p, status) &
-        bind(C, name="ComputeFTestPValue")
+subroutine ComputeFTestPValue(&
+    rssNull, dfNull, rssAlt, dfAlt, p, status &
+) bind(C, name="ComputeFTestPValue")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use iso_fortran_env, only : real64
@@ -574,7 +564,7 @@ subroutine ComputeFTestPValue(rssNull, dfNull, rssAlt, dfAlt, p, status) &
     ! The upper-tail p-value (meaningful only when status = 0).
     real(c_double), intent(out) :: p
     ! 0 if p was computed (including the perfect-alternative p = 0 branch);
-    ! 1 for R's NA cases (dfAlt <= 0, dfNull <= dfAlt, non-finite rssAlt, or
+    ! 1 for the undefined cases (dfAlt <= 0, dfNull <= dfAlt, non-finite rssAlt, or
     ! a perfect alternative fit without a worse null fit to compare against).
     integer(c_int), intent(out) :: status
 
@@ -597,8 +587,8 @@ subroutine ComputeFTestPValue(rssNull, dfNull, rssAlt, dfAlt, p, status) &
 
     ! Perfect (or, out of contract, negative-RSS) alternative fit. R forms
     ! F = ((rssNull - rssAlt)/ddf) / (rssAlt/adf): with a positive rssNull that
-    ! is +Inf and pf() gives 0 -- infinitely significant. With rssNull 0 (both
-    ! fits exact) it is 0/0 = NaN and pf() propagates it -> NA, status 1. The
+    ! is +Inf and p is 0 -- infinitely significant. With rssNull 0 (both
+    ! fits exact) it is 0/0 = NaN -> undefined, status 1. The
     ! test is written NaN-rejecting (.not. >) so an NaN rssNull lands on the
     ! same NA path here that it reaches through fstat in the normal branch.
     if (rssAlt <= 0.0d0) then
@@ -643,26 +633,18 @@ end subroutine ComputeFTestPValue
 
 ! -----------------------------------------------------------------------
 ! ComputeLoessFit -- Native loess (locally-weighted regression) matching
-! R's loess(...,
-! family="gaussian") at surface="direct", replacing R's loess() in the plot
-! overlays and the light-mass/speed loess columns.
+! the plot overlays and the light-mass/speed loess columns.
 !
-! This is the DOCUMENTED FALLBACK: the netlib dloess vendor path
-! (primary) was declined. dloess' AT&T Bell Labs license is permissive, but
-! its Fortran core loessf.f fails the statelessness gate (29 SAVE'd
-! execution counters / cached machine constants, none per-call-reinitialised)
-! and R's loess() also needs the C kd-tree interpolation driver, out of scope
-! for a Fortran-only library. So the fit is computed directly here as R's
-! surface="direct" -- see MTLoess.f90. Stateless: all
-! working storage is local to this call.
+! Each fitted value comes from an exact local polynomial fit at its own
+! abscissa rather than from interpolating a surface -- see mt_loess.f90.
+! Stateless: all working storage is local to this call.
 !
 ! For each input abscissa x_i, take q = min(n, floor(span*n + 1e-5)) nearest
 ! neighbours by |x - x_i|, weight them with the tricube kernel
 ! (1 - (d/dmax)^3)^3 where dmax is the distance to the q-th neighbour, and
 ! fit a weighted polynomial of the given degree; ys(i) is its value at x_i.
 ! -----------------------------------------------------------------------
-subroutine ComputeLoessFit(x, y, n, span, degree, ys, status) &
-        bind(C, name="ComputeLoessFit")
+subroutine ComputeLoessFit(x, y, n, span, degree, ys, status) bind(C, name="ComputeLoessFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use iso_fortran_env, only : real64, int32
     use MTLoess, only : LoessFit
@@ -673,7 +655,7 @@ subroutine ComputeLoessFit(x, y, n, span, degree, ys, status) &
     real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
     ! The number of samples in the leading part of x and y.
     integer(c_int), intent(in) :: n
-    ! Neighbourhood fraction (R's span/alpha); must be > 0.
+    ! Neighbourhood fraction; must be > 0.
     real(c_double), intent(in) :: span
     ! Local polynomial degree: 1 (locally linear) or 2 (locally quadratic).
     integer(c_int), intent(in) :: degree
@@ -720,21 +702,20 @@ end subroutine ComputeLoessFit
 
 ! -----------------------------------------------------------------------
 ! ComputeBorovickaFit -- Native per-sample Borovicka straight-line
-! radiant solver (R's minimize4 in
-! source_scripts/borovicka.r). Minimises the weighted sum of squared
+! radiant solver. Minimises the weighted sum of squared
 ! line-to-line distances between a straight trajectory and every sight, over
 ! a 4-parameter pivot chart, using the vendored L-BFGS-B 3.0 optimizer with
-! an analytic gradient. See MTBorovicka.f90 for the full algorithm.
+! an analytic gradient. See mt_borovicka.f90 for the full algorithm.
 !
 ! Non-convergence (a failed fit, a still-bound-active re-pivot, or a
 ! degenerate radiant) is signalled by NaN outputs with converged = 0 -- the
 ! DOCUMENTED signal, not an error. All quantities are in Mm (megametres);
 ! the Pascal wrapper scales the point to metres.
 ! -----------------------------------------------------------------------
-subroutine ComputeBorovickaFit(stations, nStations, stIdx, xi, eta, zeta, w, &
-        nPoints, seedPoint, seedRadiant, maxit, lmm, factr, pgtol, &
-        outRadiant, outPoint, converged, status) &
-        bind(C, name="ComputeBorovickaFit")
+subroutine ComputeBorovickaFit(&
+    stations, nStations, stIdx, xi, eta, zeta, w, nPoints, seedPoint, seedRadiant, maxit, lmm, &
+    factr, pgtol, outRadiant, outPoint, converged, status &
+) bind(C, name="ComputeBorovickaFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use MTBorovicka, only : BorovickaMinimize4
 
@@ -751,7 +732,7 @@ subroutine ComputeBorovickaFit(stations, nStations, stIdx, xi, eta, zeta, w, &
     real(c_double), intent(in) :: w(nPoints)
     ! Seed trajectory point (Mm) and seed radiant (unitless direction).
     real(c_double), intent(in) :: seedPoint(3), seedRadiant(3)
-    ! L-BFGS-B controls. Pass maxit = 300 (NOT R's 100) -- see MTBorovicka.f90.
+    ! L-BFGS-B controls. Pass maxit = 300 -- see mt_borovicka.f90.
     integer(c_int), intent(in) :: maxit, lmm
     real(c_double), intent(in) :: factr, pgtol
     ! Unit radiant and trajectory point (Mm) on return; NaN when converged = 0.
@@ -762,21 +743,20 @@ subroutine ComputeBorovickaFit(stations, nStations, stIdx, xi, eta, zeta, w, &
     ! out-of-range station index, or a workspace allocation failure).
     integer(c_int), intent(out) :: status
 
-    call BorovickaMinimize4(nStations, stations, nPoints, stIdx, xi, eta, zeta, &
-        w, seedPoint, seedRadiant, maxit, lmm, factr, pgtol, &
-        outRadiant, outPoint, converged, status)
+    call BorovickaMinimize4(&
+        nStations, stations, nPoints, stIdx, xi, eta, zeta, w, seedPoint, seedRadiant, maxit, &
+        lmm, factr, pgtol, outRadiant, outPoint, converged, status &
+    )
 
 end subroutine ComputeBorovickaFit
 
 ! -----------------------------------------------------------------------
-! ComputeBorovickaKernel -- Signed line-to-line distance kernel (R's
-! lineDistanceKernel). TEST-SUPPORT
-! export: it exposes the internal kernel so
-! the Pascal suite can assert the gauge invariances (R -> kR, P -> P + sR)
-! and the finite parallel-sentinel path. Stateless, pure.
+! ComputeBorovickaKernel -- Signed line-to-line distance kernel.
+! TEST-SUPPORT export: it exposes the internal kernel so the Pascal suite
+! can assert the gauge invariances (R -> kR, P -> P + sR) and the finite
+! parallel-sentinel path. Stateless, pure.
 ! -----------------------------------------------------------------------
-subroutine ComputeBorovickaKernel(P, R, S, u, dist) &
-        bind(C, name="ComputeBorovickaKernel")
+subroutine ComputeBorovickaKernel(P, R, S, u, dist) bind(C, name="ComputeBorovickaKernel")
     use, intrinsic :: iso_c_binding, only: c_double
     use MTBorovicka, only : BorovickaLineDistance
 
@@ -791,14 +771,14 @@ end subroutine ComputeBorovickaKernel
 
 ! -----------------------------------------------------------------------
 ! ComputeBorovickaCostGrad -- FF4 cost and its analytic gradient at a
-! given 4-parameter iterate q under
-! the pivot chart (R's FF4 / gradientFF4). TEST-SUPPORT export: it lets the
-! Pascal suite check the analytic gradient against central differences and
-! the near-parallel finiteness of both cost and gradient. Stateless.
+! given 4-parameter iterate q under the pivot chart. TEST-SUPPORT export:
+! it lets the Pascal suite check the analytic gradient against central
+! differences and the near-parallel finiteness of both cost and gradient.
+! Stateless.
 ! -----------------------------------------------------------------------
-subroutine ComputeBorovickaCostGrad(stations, nStations, stIdx, xi, eta, zeta, w, &
-        nPoints, q, k, pointFixed, cost, grad) &
-        bind(C, name="ComputeBorovickaCostGrad")
+subroutine ComputeBorovickaCostGrad(&
+    stations, nStations, stIdx, xi, eta, zeta, w, nPoints, q, k, pointFixed, cost, grad &
+) bind(C, name="ComputeBorovickaCostGrad")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
     use MTBorovicka, only : BorovickaFF4Cost, BorovickaFF4Grad
@@ -840,10 +820,12 @@ subroutine ComputeBorovickaCostGrad(stations, nStations, stIdx, xi, eta, zeta, w
         return
     end if
 
-    call BorovickaFF4Cost(nStations, stations, nPoints, stIdx, xi, eta, zeta, &
-        w, q, k, pointFixed, cost)
-    call BorovickaFF4Grad(nStations, stations, nPoints, stIdx, xi, eta, zeta, &
-        w, q, k, pointFixed, grad)
+    call BorovickaFF4Cost(&
+        nStations, stations, nPoints, stIdx, xi, eta, zeta, w, q, k, pointFixed, cost &
+    )
+    call BorovickaFF4Grad(&
+        nStations, stations, nPoints, stIdx, xi, eta, zeta, w, q, k, pointFixed, grad &
+    )
 
 end subroutine ComputeBorovickaCostGrad
 

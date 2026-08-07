@@ -1,15 +1,14 @@
 ! =======================================================================
 ! MTSelect -- Order-statistic primitives shared by the MT numerics: a
-! deterministic
-! selection routine and the R-compatible median / MAD built on it.
+! deterministic selection routine and the median / MAD built on it.
 !
-! These live in their own module because two unrelated consumers need the same
-! primitive -- MTRobust for the medians the mblm estimators are defined by, and
-! MTLoess for the q-th nearest-neighbour distance that sets its bandwidth --
-! and neither is a natural owner for the other.
+! These live in their own module because two unrelated consumers need the
+! same primitive -- MTRobust for the medians its estimators are defined
+! by, and MTLoess for the q-th nearest-neighbour distance that sets its
+! bandwidth -- and neither is a natural owner for the other.
 !
-! Stateless and pure throughout: no SAVE, no module variables, no I/O, all
-! working storage in caller-passed arrays or locals.
+! Stateless and pure throughout: no SAVE, no module variables, no I/O,
+! all working storage in caller-passed arrays or locals.
 ! =======================================================================
 module MTSelect
 
@@ -23,13 +22,13 @@ contains
 
 ! -----------------------------------------------------------------------
 ! SelectKth -- Partially reorders a(1:m) so that a(k) becomes the k-th
-! smallest element,
-! every earlier element is <= it and every later element is >= it.
+! smallest element, every earlier element is <= it and every later
+! element is >= it.
 !
-! Quickselect with a median-of-three pivot: O(m) expected, iterative (no
-! recursion), no working storage, and fully DETERMINISTIC -- no
-! randomisation, so equal input always yields a bitwise equal result, which
-! the reentrancy suite's bitwise-equality requirement depends on.
+! Quickselect with a median-of-three pivot: O(m) expected, iterative, no
+! working storage. Fully deterministic -- no randomisation, so equal
+! input always yields a bitwise equal result, which the reentrancy
+! suite's bitwise-equality requirement depends on.
 ! -----------------------------------------------------------------------
 pure subroutine SelectKth(a, m, k)
     integer(int32), intent(in) :: m, k
@@ -41,8 +40,8 @@ pure subroutine SelectKth(a, m, k)
     lo = 1
     hi = m
     do while (lo < hi)
-        ! Median-of-three (lo, mid, hi), which also leaves a(lo) <= pivot <= a(hi)
-        ! and so bounds both partition scans below without an explicit index test.
+        ! Median-of-three leaves a(lo) <= pivot <= a(hi), which bounds both
+        ! partition scans below without an explicit index test.
         mid = lo + (hi - lo) / 2
         if (a(mid) < a(lo)) then
             t = a(mid); a(mid) = a(lo); a(lo) = t
@@ -84,12 +83,12 @@ pure subroutine SelectKth(a, m, k)
 end subroutine SelectKth
 
 ! -----------------------------------------------------------------------
-! MedianInplace -- R's median of a(1:m) -- the central order statistic
-! for odd m, the mean of
-! the two central ones for even m -- computed by selection. REORDERS `a`, so
-! the caller must be done with its order. Identical value to sorting: the
-! order statistics of a multiset do not depend on how they are found.
-! (A subroutine, not a function: a pure function may not take intent(inout).)
+! MedianInplace -- Median of a(1:m): the central order statistic for odd
+! m, the mean of the two central ones for even m.
+!
+! REORDERS `a`, so the caller must be done with its order. A subroutine
+! rather than a function because a pure function may not take
+! intent(inout).
 ! -----------------------------------------------------------------------
 pure subroutine MedianInplace(a, m, med)
     integer(int32), intent(in) :: m
@@ -112,10 +111,11 @@ pure subroutine MedianInplace(a, m, med)
 end subroutine MedianInplace
 
 ! -----------------------------------------------------------------------
-! MadInplace -- R's mad(a) = 1.4826 * median(|a - center|) with center =
-! median(a), which
-! every caller here has already computed. OVERWRITES `a` with the absolute
-! deviations, so one buffer serves both the median and the MAD.
+! MadInplace -- 1.4826 * median(|a - center|), the scaled median absolute
+! deviation about a centre the caller has already computed.
+!
+! OVERWRITES `a` with the absolute deviations, so one buffer serves both
+! the median and the MAD.
 ! -----------------------------------------------------------------------
 pure subroutine MadInplace(a, m, center, res)
     integer(int32), intent(in) :: m
@@ -131,9 +131,8 @@ pure subroutine MadInplace(a, m, center, res)
 end subroutine MadInplace
 
 ! -----------------------------------------------------------------------
-! MedianOf -- Non-destructive R median, for the O(n)-sized vectors where
-! a private copy
-! costs nothing. The big pairwise buffer uses MedianInplace instead.
+! MedianOf -- Non-destructive median, for the O(n)-sized vectors where a
+! private copy costs nothing. The big pairwise buffer uses MedianInplace.
 ! -----------------------------------------------------------------------
 pure function MedianOf(a, m) result(med)
     integer(int32), intent(in) :: m
@@ -147,7 +146,7 @@ pure function MedianOf(a, m) result(med)
 end function MedianOf
 
 ! -----------------------------------------------------------------------
-! MadOf -- Non-destructive R mad(a) = 1.4826 * median(|a - median(a)|), for the
+! MadOf -- Non-destructive 1.4826 * median(|a - median(a)|), for the
 ! O(n)-sized vectors.
 ! -----------------------------------------------------------------------
 pure function MadOf(a, m) result(res)
