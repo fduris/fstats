@@ -31,11 +31,29 @@ set(FSTATS_SOURCES
     src/fstats_types.f90
     src/fstats_mcmc.f90
     src/fstats_interp.f90
+    src/mt_select.f90
+    src/mt_expfit.f90
+    src/mt_robust.f90
+    src/mt_loess.f90
+    src/mt_borovicka.f90
+    src/vendored/lbfgsb.f
+    src/vendored/linpack_subset.f
+    src/vendored/timer_stub.f
 )
 
 set_source_files_properties(${FSTATS_SOURCES} PROPERTIES
     Fortran_PREPROCESS ON
 )
+
+# The vendored L-BFGS-B 3.0 sources are fixed-form F77 kept verbatim; build
+# them under legacy Fortran with warnings off (they cannot meet the strict
+# -std=f2018 -Werror the rest of the library uses) and with the C-style
+# preprocessor disabled (they contain no directives and have F77 comment
+# syntax the preprocessor would choke on). This must follow the blanket
+# Fortran_PREPROCESS ON above so the per-file OFF wins.
+set_source_files_properties(
+    src/vendored/lbfgsb.f src/vendored/linpack_subset.f src/vendored/timer_stub.f
+    PROPERTIES COMPILE_OPTIONS "-std=legacy;-w" Fortran_PREPROCESS OFF)
 
 set(MT_SOURCES
     mt/mt_fstats.f90
