@@ -1,0 +1,128 @@
+# Vendored L-BFGS-B 3.0
+
+This directory contains the reference implementation of the L-BFGS-B
+bound-constrained limited-memory quasi-Newton optimizer, vendored into
+libfstats so the native exp-model fit (`ComputeExpFitLBFGSB`, see
+`../mt_expfit.f90` and `../../mt/mt_fstats.f90`) no longer needs R's
+`optim(method="L-BFGS-B")`.
+
+## Provenance
+
+- Package:  L-BFGS-B, version 3.0 (April 25, 2011)
+- Authors:  Ciyou Zhu, Richard Byrd, Jorge Nocedal, Jose Luis Morales
+- Upstream: https://users.iems.northwestern.edu/~nocedal/Software/Lbfgsb.3.0.tar.gz
+            (scipy carries the identical files under scipy/optimize/lbfgsb_src
+             in releases up to v1.11.x)
+- Reference: R. H. Byrd, P. Lu, J. Nocedal and C. Zhu, "A limited memory
+  algorithm for bound constrained optimization", SIAM J. Sci. Comput. 16
+  (1995), no. 5, pp. 1190-1208; and J. Nocedal and J. L. Morales, "Remark on
+  Algorithm 778" (2011), ACM TOMS.
+
+## Files and what was changed
+
+- `lbfgsb.f`         -- upstream `lbfgsb.f` (setulb + mainlb + all subordinate
+                        routines), verbatim APART from the console-output
+                        deviation below.
+                        upstream md5: 6ac901ddec34ba8e2dd60729f9ae0feb
+- `linpack_subset.f` -- verbatim copy of the upstream `linpack.f`, which
+                        already contains only `dpofa` and `dtrsl` (the two
+                        LINPACK routines L-BFGS-B needs that are NOT in
+                        LAPACK). Renamed to make its "subset" role explicit.
+                        upstream md5: 0159ad437b5712adc55a42a85b4e7fcf
+- `timer_stub.f`     -- REPLACES upstream `timer.f`; returns a constant 0 so
+                        the optimizer is deterministic (see the file header).
+
+### Deviation: unguarded console writes commented out
+
+Both drivers here run the optimizer with `iprint = -1`, which suppresses the
+iteration report and the `iterate.dat` file. Three `write(6,*)` calls in the
+reference sources are **not** under an `iprint` test, however, and so printed to
+stdout from inside `libfstats.so` regardless:
+
+| Routine  | Message                                                     |
+| -------- | ----------------------------------------------------------- |
+| `lnsrlb` | ` ascent direction in projection gd = ...`                  |
+| `subsm`  | ` Positive dir derivative in projection ` (+ ` Using the backtracking step `) |
+
+Both are reachable on ill-conditioned problems -- the `subsm` pair is the message
+scipy users know from the same upstream code, which scipy also patches out. They
+are commented out here, each marked `MT DEVIATION`, for two reasons: stray text
+on stdout corrupts machine-readable CLI output, and MT plans a threaded batch
+mode in which several solver calls would write to Fortran unit 6 concurrently.
+
+No control flow changed -- `lnsrlb` still sets `info = -4` and returns, and
+`subsm` still takes the backtracking step -- so the caller learns of both
+conditions through the normal reverse-communication path. Every other
+`write (6,...)` in the file is already `iprint`-guarded and is left untouched.
+
+## Deliberately NOT vendored
+
+- `blas.f` (the bundled `dcopy`/`daxpy`/`ddot`/`dscal`/`dnrm2`). libfstats
+  already links the system BLAS (libblas.so.3, transitively via liblinalg);
+  bundling a second copy would create duplicate symbols. L-BFGS-B here uses
+  only `dcopy`, `daxpy`, `ddot`, `dscal` from BLAS-1, all resolved from the
+  linked BLAS. (`dnrm2` is not referenced by lbfgsb.f.)
+- The drivers, Makefile, PDFs, and sample outputs from the tarball.
+- **netlib PORT `dn2gb` (bounded NL2SOL).** The native bounded exp-model fit
+  (`ComputeExpFitPort`) replaces R's `nls(algorithm="port")`. The intended
+  vendor source was netlib's `dn2gb` (double-precision NL2SOL with simple
+  bounds) from <https://netlib.org/port/>. It was **declined on licensing
+  grounds**: unlike the unbounded NL2SOL (TOMS Algorithm 573, whose
+  ACM-distributed form carries a permissive license), the *bounded* `dn2gb`
+  exists only inside the PORT library, which per <https://netlib.org/port/readme>
+  is copyright "1984, AT&T Bell Telephone Laboratories, Inc." and is available
+  "without charge for **non-commercial use** [only] under a non-exclusive
+  limited-use software agreement" -- commercial use requires a separate Lucent
+  license. `dn2gb.f` itself carries no BSD/ACM grant (it only cites the NL2SOL
+  paper for the algorithm). Because this repository ships compiled binaries
+  (`libfstats.so`), a non-commercial-use-only dependency cannot be embedded.
+  `ComputeExpFitPort` is therefore implemented as a **projected Gauss-Newton
+  substitute** in `../mt_expfit.f90` (`expfit_gauss_newton_bounded`): the same
+  analytic-Jacobian Gauss-Newton as the unbounded fit, with each trial step
+  clamped into the box. See the task-5 report for the full gate evidence.
+
+## License
+
+L-BFGS-B 3.0 is distributed under the 3-clause ("New"/"Modified") BSD License.
+The full text lives in `License.txt` in this directory -- both `lbfgsb.f` and
+`linpack_subset.f` say "Please read attached file License.txt" in their headers,
+so that file is present here for the reference to resolve. It also records the
+authors, because upstream ships the BSD template with its `<year>` /
+`<copyright holder>` / `<organization>` placeholders unfilled.
+
+**Binary redistribution:** clause 2 of the license requires the notice to be
+reproduced in the materials provided with a binary distribution, and this
+repository ships compiled libraries. `../../THIRD_PARTY_NOTICES.md` is the file
+meant to travel with them; see it before packaging a `libfstats.so`/`.dll`. (This
+is the same reasoning that ruled out vendoring netlib PORT above -- it applies to
+what *is* vendored too.)
+
+The upstream `License.txt` text, reproduced here for convenience:
+
+    Copyright (c) <year>, <copyright holder>
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+        * Redistributions of source code must retain the above copyright
+          notice, this list of conditions and the following disclaimer.
+        * Redistributions in binary form must reproduce the above copyright
+          notice, this list of conditions and the following disclaimer in the
+          documentation and/or other materials provided with the distribution.
+        * Neither the name of the <organization> nor the
+          names of its contributors may be used to endorse or promote products
+          derived from this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+    ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+    (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+    ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The per-file BSD header comment at the top of `lbfgsb.f` and
+`linpack_subset.f` is retained unchanged.
