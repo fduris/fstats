@@ -31,10 +31,26 @@ set(FSTATS_SOURCES
     src/fstats_types.f90
     src/fstats_mcmc.f90
     src/fstats_interp.f90
+    src/mt_select.f90
+    src/mt_expfit.f90
+    src/mt_robust.f90
+    src/mt_loess.f90
+    src/mt_borovicka.f90
+    src/vendored/lbfgsb.f
+    src/vendored/linpack_subset.f
+    src/vendored/timer_stub.f
 )
 
 set_source_files_properties(${FSTATS_SOURCES} PROPERTIES
     Fortran_PREPROCESS ON
+)
+
+# Fixed-form F77 cannot meet the -std=f2018 -Werror used for the rest of the
+# library, and its comment syntax would choke the C preprocessor. Must follow
+# the blanket Fortran_PREPROCESS ON above so the per-file OFF wins.
+set_source_files_properties(
+    src/vendored/lbfgsb.f src/vendored/linpack_subset.f src/vendored/timer_stub.f
+    PROPERTIES COMPILE_OPTIONS "-std=legacy;-w" Fortran_PREPROCESS OFF
 )
 
 set(MT_SOURCES
