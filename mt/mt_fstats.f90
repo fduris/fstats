@@ -1,25 +1,33 @@
+! ---------------------------------------------------------------------------
+! The array exports below take n-sized explicit-shape dummies: every trail
+! array is described by the sample count `n` that travels with it, so the
+! caller passes its own buffer by first element and nothing here is bounded by
+! a constant the caller has to agree with. `n` is therefore declared ahead of
+! the arrays it sizes -- a specification expression may only use entities
+! already declared. There is no upper bound on n at this boundary: the arrays
+! are exactly as long as the caller says, and any resource cap (the quadratic
+! Theil-Sen estimator excepted, which carries its own in mt_robust.f90) is the
+! caller's policy, not an ABI constraint.
+! ---------------------------------------------------------------------------
 module MT
 
 implicit none
-
-integer, parameter :: MAX_TRAIL_LENGTH = 100000
 
 contains
 
 subroutine ComputeLowessFit(x, y, ys, n, fsmooth, nstps) bind(C, name="ComputeLowessFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
-    use iso_fortran_env, only : real64, int32
     use fstats, only : lowess
 
+    ! The number of points in the input arrays.
+    integer(c_int), intent(in) :: n
     ! An N-element array containing the independent variable data.  This
     ! array must be monotonically increasing.
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: x
+    real(c_double), intent(in), dimension(n) :: x
     ! An N-element array containing the dependent variable data.
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
+    real(c_double), intent(in), dimension(n) :: y
     ! An N-element array where the smoothed results will be written.
-    real(c_double), intent(out), dimension(1:MAX_TRAIL_LENGTH) :: ys
-    ! The number of non-zero points in the input arrays
-    integer(c_int), intent(in) :: n
+    real(c_double), intent(out), dimension(n) :: ys
     ! An optional input that specifies the amount of smoothing.
     ! Specifically, this value is the fraction of points used to compute
     ! each value.  As this value increases, the output becomes smoother.
@@ -30,21 +38,7 @@ subroutine ComputeLowessFit(x, y, ys, n, fsmooth, nstps) bind(C, name="ComputeLo
     ! zero, a non-robust fit is returned.  The default value is set to 2.
     integer(c_int), intent(in) :: nstps
 
-    real(real64), allocatable :: scopedX(:), scopedY(:), scopedYs(:)
-
-    ! prepare data for lowess
-    allocate(scopedX(n), scopedY(n), scopedYs(n))
-
-    scopedX = x(1:n)
-    scopedY = y(1:n)
-
-    call lowess(scopedX, scopedY, scopedYs, fsmooth, nstps)
-
-    ! copy results back to output array
-    ys = 0.0d0
-    ys(1:n) = scopedYs
-
-    deallocate(scopedX, scopedY, scopedYs)
+    call lowess(x, y, ys, fsmooth, nstps)
 
 end subroutine ComputeLowessFit
 
@@ -52,15 +46,14 @@ subroutine ComputeExpFitLBFGSB(&
     x, y, n, seed, lower, upper, maxit, lmm, factr, pgtol, coef, fval, convergence, status &
 ) bind(C, name="ComputeExpFitLBFGSB")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
-    use iso_fortran_env, only : real64, int32
     use MTExpFit, only : ExpFitLBFGSB
 
-    ! An N-element array of the independent variable (e.g. time).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: x
-    ! An N-element array of the dependent variable (e.g. distance).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
-    ! The number of samples in the leading part of x and y.
+    ! The number of samples in x and y.
     integer(c_int), intent(in) :: n
+    ! An N-element array of the independent variable (e.g. time).
+    real(c_double), intent(in), dimension(n) :: x
+    ! An N-element array of the dependent variable (e.g. distance).
+    real(c_double), intent(in), dimension(n) :: y
     ! Initial guess for (a0, aa, bb, cc).
     real(c_double), intent(in), dimension(1:4) :: seed
     ! Lower box bounds for (a0, aa, bb, cc).
@@ -86,32 +79,23 @@ subroutine ComputeExpFitLBFGSB(&
     ! sizes / allocation failure).
     integer(c_int), intent(out) :: status
 
-    real(real64), allocatable :: scopedX(:), scopedY(:)
-
     coef = seed
     fval = 0.0d0
     convergence = 52
     status = 0
 
-    ! This wrapper had NO size check at all: x/y are declared with the fixed
-    ! MAX_TRAIL_LENGTH extent, so n above it read past the end of both dummies,
-    ! and ExpFitLBFGSB's own n < 1 rejection was unreachable because the copy
-    ! happened first.
-    if (n < 1 .or. n > MAX_TRAIL_LENGTH) then
+    ! An empty series has nothing to fit. ExpFitLBFGSB rejects it too; rejecting
+    ! it here as well keeps every export in this file answering an unusable n the
+    ! same way, whatever the routine behind it does.
+    if (n < 1) then
         status = 1
         return
     end if
 
-    allocate(scopedX(n), scopedY(n))
-    scopedX = x(1:n)
-    scopedY = y(1:n)
-
     call ExpFitLBFGSB(&
-        n, scopedX, scopedY, seed, lower, upper, maxit, lmm, factr, pgtol, coef, fval, &
+        n, x, y, seed, lower, upper, maxit, lmm, factr, pgtol, coef, fval, &
         convergence, status &
     )
-
-    deallocate(scopedX, scopedY)
 
 end subroutine ComputeExpFitLBFGSB
 
@@ -119,15 +103,14 @@ subroutine ComputeExpFitGN(&
     x, y, n, seed, maxit, tol, minFactor, coef, se, sigma, convergence, status &
 ) bind(C, name="ComputeExpFitGN")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
-    use iso_fortran_env, only : real64, int32
     use MTExpFit, only : ExpFitGaussNewton
 
-    ! An N-element array of the independent variable (e.g. time).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: x
-    ! An N-element array of the dependent variable (e.g. distance).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
-    ! The number of samples in the leading part of x and y.
+    ! The number of samples in x and y.
     integer(c_int), intent(in) :: n
+    ! An N-element array of the independent variable (e.g. time).
+    real(c_double), intent(in), dimension(n) :: x
+    ! An N-element array of the dependent variable (e.g. distance).
+    real(c_double), intent(in), dimension(n) :: y
     ! Initial guess for (a0, aa, bb, cc).
     real(c_double), intent(in), dimension(1:4) :: seed
     ! Maximum number of Gauss-Newton iterations.
@@ -146,11 +129,9 @@ subroutine ComputeExpFitGN(&
     ! Convergence code: 0 converged, 1 iteration limit, 2 step factor below
     ! minFactor, 3 singular Jacobian / linear-algebra failure.
     integer(c_int), intent(out) :: convergence
-    ! 0 if the fit ran; 1 if it could not be started (n < 5, n > MAX_TRAIL_LENGTH,
-    ! maxit < 1, or non-positive tol/minFactor).
+    ! 0 if the fit ran; 1 if it could not be started (n < 5, maxit < 1, or
+    ! non-positive tol/minFactor).
     integer(c_int), intent(out) :: status
-
-    real(real64), allocatable :: scopedX(:), scopedY(:)
 
     coef = 0.0d0
     se = 0.0d0
@@ -158,20 +139,14 @@ subroutine ComputeExpFitGN(&
     convergence = 1
     status = 0
 
-    if (n < 1 .or. n > MAX_TRAIL_LENGTH) then
+    if (n < 1) then
         status = 1
         return
     end if
 
-    allocate(scopedX(n), scopedY(n))
-    scopedX = x(1:n)
-    scopedY = y(1:n)
-
     call ExpFitGaussNewton(&
-        n, scopedX, scopedY, seed, maxit, tol, minFactor, coef, se, sigma, convergence, status &
+        n, x, y, seed, maxit, tol, minFactor, coef, se, sigma, convergence, status &
     )
-
-    deallocate(scopedX, scopedY)
 
 end subroutine ComputeExpFitGN
 
@@ -185,15 +160,15 @@ subroutine ComputeExpFitPort(&
     x, y, n, seed, lower, upper, maxit, tol, coef, se, sigma, convergence, status &
 ) bind(C, name="ComputeExpFitPort")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
-    use iso_fortran_env, only : real64, int32
+    use iso_fortran_env, only : real64
     use MTExpFit, only : ExpFitGaussNewtonBounded
 
-    ! An N-element array of the independent variable (e.g. time).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: x
-    ! An N-element array of the dependent variable (e.g. distance).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
-    ! The number of samples in the leading part of x and y.
+    ! The number of samples in x and y.
     integer(c_int), intent(in) :: n
+    ! An N-element array of the independent variable (e.g. time).
+    real(c_double), intent(in), dimension(n) :: x
+    ! An N-element array of the dependent variable (e.g. distance).
+    real(c_double), intent(in), dimension(n) :: y
     ! Initial guess for (a0, aa, bb, cc); projected onto the box if outside it.
     real(c_double), intent(in), dimension(1:4) :: seed
     ! Lower box bounds for (a0, aa, bb, cc).
@@ -214,14 +189,12 @@ subroutine ComputeExpFitPort(&
     ! Convergence code: 0 converged, 1 iteration limit, 2 step factor below
     ! minFactor, 3 singular Jacobian / linear-algebra failure.
     integer(c_int), intent(out) :: convergence
-    ! 0 if the fit ran; 1 if it could not be started (n < 5, n > MAX_TRAIL_LENGTH,
-    ! maxit < 1, non-positive tol, or an empty box lower > upper).
+    ! 0 if the fit ran; 1 if it could not be started (n < 5, maxit < 1,
+    ! non-positive tol, or an empty box lower > upper).
     integer(c_int), intent(out) :: status
 
     ! Baked in because this wrapper does not expose minFactor as a knob.
     real(real64), parameter :: MINFACTOR = 1.0d0 / 1024.0d0
-
-    real(real64), allocatable :: scopedX(:), scopedY(:)
 
     coef = 0.0d0
     se = 0.0d0
@@ -229,21 +202,15 @@ subroutine ComputeExpFitPort(&
     convergence = 1
     status = 0
 
-    if (n < 1 .or. n > MAX_TRAIL_LENGTH) then
+    if (n < 1) then
         status = 1
         return
     end if
 
-    allocate(scopedX(n), scopedY(n))
-    scopedX = x(1:n)
-    scopedY = y(1:n)
-
     call ExpFitGaussNewtonBounded(&
-        n, scopedX, scopedY, seed, lower, upper, maxit, tol, MINFACTOR, coef, se, sigma, &
+        n, x, y, seed, lower, upper, maxit, tol, MINFACTOR, coef, se, sigma, &
         convergence, status &
     )
-
-    deallocate(scopedX, scopedY)
 
 end subroutine ComputeExpFitPort
 
@@ -251,15 +218,14 @@ subroutine ComputeTheilSenFit(&
     x, y, n, slope, intercept, sigma, seSlope, seIntercept, status &
 ) bind(C, name="ComputeTheilSenFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
-    use iso_fortran_env, only : real64, int32
     use MTRobust, only : TheilSenFit, MAX_THEILSEN_LENGTH
 
-    ! An N-element array of the independent variable (e.g. time).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: x
-    ! An N-element array of the dependent variable (e.g. distance).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
-    ! The number of samples in the leading part of x and y.
+    ! The number of samples in x and y.
     integer(c_int), intent(in) :: n
+    ! An N-element array of the independent variable (e.g. time).
+    real(c_double), intent(in), dimension(n) :: x
+    ! An N-element array of the dependent variable (e.g. distance).
+    real(c_double), intent(in), dimension(n) :: y
     ! Theil-Sen slope estimate.
     real(c_double), intent(out) :: slope
     ! Intercept: median(y - slope*x).
@@ -275,8 +241,6 @@ subroutine ComputeTheilSenFit(&
     ! data are degenerate (all x equal, so no slope is defined).
     integer(c_int), intent(out) :: status
 
-    real(real64), allocatable :: scopedX(:), scopedY(:)
-
     slope = 0.0d0
     intercept = 0.0d0
     sigma = 0.0d0
@@ -285,29 +249,23 @@ subroutine ComputeTheilSenFit(&
     status = 0
 
     ! n >= 3 keeps the sigma denominator (n-2) positive. The upper bound is
-    ! MAX_THEILSEN_LENGTH, NOT the general MAX_TRAIL_LENGTH: this estimator is
-    ! defined over all n(n-1)/2 pairwise slopes and has to materialise them, so
-    ! its cost is quadratic in memory and time. See mt_robust.f90.
+    ! MAX_THEILSEN_LENGTH: this estimator is defined over all n(n-1)/2 pairwise
+    ! slopes and has to materialise them, so its cost is quadratic in memory and
+    ! time. It is the one size cap this file still imposes -- it is the
+    ! estimator's own, not a marshalling limit. See mt_robust.f90.
     if (n < 3 .or. n > MAX_THEILSEN_LENGTH) then
         status = 1
         return
     end if
 
-    allocate(scopedX(n), scopedY(n))
-    scopedX = x(1:n)
-    scopedY = y(1:n)
-
     ! With every x identical there is no distinct-x pair and no slope; report
     ! it rather than divide by zero.
-    if (all(scopedX == scopedX(1))) then
+    if (all(x == x(1))) then
         status = 2
-        deallocate(scopedX, scopedY)
         return
     end if
 
-    call TheilSenFit(n, scopedX, scopedY, slope, intercept, sigma, seSlope, seIntercept, status)
-
-    deallocate(scopedX, scopedY)
+    call TheilSenFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, status)
 
 end subroutine ComputeTheilSenFit
 
@@ -315,15 +273,14 @@ subroutine ComputeSiegelFit(&
     x, y, n, slope, intercept, sigma, seSlope, seIntercept, status &
 ) bind(C, name="ComputeSiegelFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
-    use iso_fortran_env, only : real64, int32
     use MTRobust, only : SiegelFit
 
-    ! An N-element array of the independent variable (e.g. time).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: x
-    ! An N-element array of the dependent variable (e.g. distance).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
-    ! The number of samples in the leading part of x and y.
+    ! The number of samples in x and y.
     integer(c_int), intent(in) :: n
+    ! An N-element array of the independent variable (e.g. time).
+    real(c_double), intent(in), dimension(n) :: x
+    ! An N-element array of the dependent variable (e.g. distance).
+    real(c_double), intent(in), dimension(n) :: y
     ! Siegel repeated-median slope estimate.
     real(c_double), intent(out) :: slope
     ! Siegel repeated-median intercept estimate.
@@ -334,12 +291,10 @@ subroutine ComputeSiegelFit(&
     real(c_double), intent(out) :: seSlope
     ! MAD of the per-point median intercepts (the coefficient error).
     real(c_double), intent(out) :: seIntercept
-    ! 0 if the fit was computed; 1 if it could not be started (n < 3,
-    ! n > MAX_TRAIL_LENGTH, or a working-buffer allocation failure); 2 if the
-    ! data are degenerate (all x equal, so no slope is defined).
+    ! 0 if the fit was computed; 1 if it could not be started (n < 3 or a
+    ! working-buffer allocation failure); 2 if the data are degenerate (all x
+    ! equal, so no slope is defined).
     integer(c_int), intent(out) :: status
-
-    real(real64), allocatable :: scopedX(:), scopedY(:)
 
     slope = 0.0d0
     intercept = 0.0d0
@@ -348,24 +303,17 @@ subroutine ComputeSiegelFit(&
     seIntercept = 0.0d0
     status = 0
 
-    if (n < 3 .or. n > MAX_TRAIL_LENGTH) then
+    if (n < 3) then
         status = 1
         return
     end if
 
-    allocate(scopedX(n), scopedY(n))
-    scopedX = x(1:n)
-    scopedY = y(1:n)
-
-    if (all(scopedX == scopedX(1))) then
+    if (all(x == x(1))) then
         status = 2
-        deallocate(scopedX, scopedY)
         return
     end if
 
-    call SiegelFit(n, scopedX, scopedY, slope, intercept, sigma, seSlope, seIntercept, status)
-
-    deallocate(scopedX, scopedY)
+    call SiegelFit(n, x, y, slope, intercept, sigma, seSlope, seIntercept, status)
 
 end subroutine ComputeSiegelFit
 
@@ -399,12 +347,12 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) bind(C, name="
     use fstats_regression, only : covariance_matrix
     use ferror, only : errors
 
-    ! An N-element array of the independent variable (e.g. time).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: x
-    ! An N-element array of the dependent variable (e.g. distance).
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
-    ! The number of samples in the leading part of x and y.
+    ! The number of samples in x and y.
     integer(c_int), intent(in) :: n
+    ! An N-element array of the independent variable (e.g. time).
+    real(c_double), intent(in), dimension(n) :: x
+    ! An N-element array of the dependent variable (e.g. distance).
+    real(c_double), intent(in), dimension(n) :: y
     ! The number of coefficients: 2 for [1, x], 3 for [1, x, x^2/2].
     integer(c_int), intent(in) :: nCoef
     ! The fitted coefficients (only the leading nCoef are meaningful).
@@ -414,10 +362,10 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) bind(C, name="
     ! The residual standard error sqrt(SSR / (n - nCoef)).
     real(c_double), intent(out) :: sigma
     ! 0 if the fit was computed; 1 if it could not be started (nCoef not in
-    ! {2, 3}, n <= nCoef so the residual degrees of freedom would be <= 0, or
-    ! n > MAX_TRAIL_LENGTH); 2 if the design matrix is numerically
-    ! rank-deficient (see RANK_TOL below), or the covariance solve failed
-    ! (an allocation failure inside covariance_matrix).
+    ! {2, 3}, or n <= nCoef so the residual degrees of freedom would be <= 0);
+    ! 2 if the design matrix is numerically rank-deficient (see RANK_TOL below),
+    ! or the covariance solve failed (an allocation failure inside
+    ! covariance_matrix).
     integer(c_int), intent(out) :: status
 
     ! LAPACK SVD, used only for the singular values (resolved via the linked
@@ -431,7 +379,7 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) bind(C, name="
     real(real64), parameter :: RANK_TOL = 1.0d-7
 
     real(real64), allocatable :: a(:,:), cov(:,:), xty(:), coeffs(:)
-    real(real64), allocatable :: scopedX(:), scopedY(:), ymod(:), resid(:)
+    real(real64), allocatable :: ymod(:), resid(:)
     real(real64), allocatable :: asv(:,:), sval(:), svwork(:)
     real(real64) :: ssr, var, svq(1), udum(1,1), vdum(1,1)
     integer(int32) :: i, dof, svinfo, svlwork
@@ -450,25 +398,20 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) bind(C, name="
         status = 1
         return
     end if
-    ! n > nCoef keeps the residual degrees of freedom (n - nCoef) positive; the
-    ! upper bound matches the fixed input arrays.
-    if (n <= nCoef .or. n > MAX_TRAIL_LENGTH) then
+    ! n > nCoef keeps the residual degrees of freedom (n - nCoef) positive.
+    if (n <= nCoef) then
         status = 1
         return
     end if
 
     allocate(&
-        a(n, nCoef), cov(nCoef, nCoef), xty(nCoef), coeffs(nCoef), scopedX(n), scopedY(n), &
-        ymod(n), resid(n) &
+        a(n, nCoef), cov(nCoef, nCoef), xty(nCoef), coeffs(nCoef), ymod(n), resid(n) &
     )
-
-    scopedX = x(1:n)
-    scopedY = y(1:n)
 
     ! Design matrix columns: [1, x] and, for nCoef = 3, x^2/2 (see the header).
     a(:, 1) = 1.0d0
-    a(:, 2) = scopedX
-    if (nCoef == 3) a(:, 3) = half * scopedX * scopedX
+    a(:, 2) = x
+    if (nCoef == 3) a(:, 3) = half * x * x
 
     ! Numerical rank of the design from its singular values. dgesvd destroys its
     ! input and needs no singular vectors here ('N', 'N'), so it runs on a scratch
@@ -482,7 +425,7 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) bind(C, name="
     if (svinfo /= 0 .or. sval(1) <= zero .or. &
             sval(nCoef) <= RANK_TOL * sval(1)) then
         status = 2
-        deallocate(a, cov, xty, coeffs, scopedX, scopedY, ymod, resid)
+        deallocate(a, cov, xty, coeffs, ymod, resid)
         deallocate(asv, sval, svwork)
         return
     end if
@@ -493,15 +436,15 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) bind(C, name="
     call covariance_matrix(a, cov, errmgr)
     if (errmgr%has_error_occurred()) then
         status = 2
-        deallocate(a, cov, xty, coeffs, scopedX, scopedY, ymod, resid)
+        deallocate(a, cov, xty, coeffs, ymod, resid)
         return
     end if
 
     ! coeffs = cov * (X^T y); model values and residuals follow directly.
-    xty = matmul(transpose(a), scopedY)
+    xty = matmul(transpose(a), y)
     coeffs = matmul(cov, xty)
     ymod = matmul(a, coeffs)
-    resid = ymod - scopedY
+    resid = ymod - y
 
     ! Residual standard error and coefficient standard errors, matching
     ! var = SSR/(n - nCoef), se_i = sqrt(var * cov_ii).
@@ -514,7 +457,7 @@ subroutine ComputeOlsFit(x, y, n, nCoef, coef, se, sigma, status) bind(C, name="
         se(i) = sqrt(var * cov(i, i))
     end do
 
-    deallocate(a, cov, xty, coeffs, scopedX, scopedY, ymod, resid)
+    deallocate(a, cov, xty, coeffs, ymod, resid)
 
 end subroutine ComputeOlsFit
 
@@ -646,36 +589,34 @@ end subroutine ComputeFTestPValue
 ! -----------------------------------------------------------------------
 subroutine ComputeLoessFit(x, y, n, span, degree, ys, status) bind(C, name="ComputeLoessFit")
     use, intrinsic :: iso_c_binding, only: c_double, c_int
-    use iso_fortran_env, only : real64, int32
     use MTLoess, only : LoessFit
 
-    ! An N-element array containing the independent variable data.
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: x
-    ! An N-element array containing the dependent variable data.
-    real(c_double), intent(in), dimension(1:MAX_TRAIL_LENGTH) :: y
-    ! The number of samples in the leading part of x and y.
+    ! The number of samples in x, y and ys.
     integer(c_int), intent(in) :: n
+    ! An N-element array containing the independent variable data.
+    real(c_double), intent(in), dimension(n) :: x
+    ! An N-element array containing the dependent variable data.
+    real(c_double), intent(in), dimension(n) :: y
     ! Neighbourhood fraction; must be > 0.
     real(c_double), intent(in) :: span
     ! Local polynomial degree: 1 (locally linear) or 2 (locally quadratic).
     integer(c_int), intent(in) :: degree
-    ! An N-element array where the fitted values are written (0 elsewhere).
-    real(c_double), intent(out), dimension(1:MAX_TRAIL_LENGTH) :: ys
-    ! 0 if the fit was computed; 1 if it could not be started (n < 1,
-    ! n > MAX_TRAIL_LENGTH, degree not in {1, 2}, or span <= 0); 2 if a local
-    ! neighbourhood was degenerate (too few positive-weight points to determine
-    ! the local polynomial, coincident abscissae, or a singular normal matrix).
+    ! An N-element array where the fitted values are written. Meaningful only
+    ! when status = 0; on either rejection below it is left untouched, and on a
+    ! degenerate fit it holds whatever LoessFit reached before giving up.
+    real(c_double), intent(out), dimension(n) :: ys
+    ! 0 if the fit was computed; 1 if it could not be started (n < 1, degree not
+    ! in {1, 2}, or span <= 0); 2 if a local neighbourhood was degenerate (too
+    ! few positive-weight points to determine the local polynomial, coincident
+    ! abscissae, or a singular normal matrix).
     integer(c_int), intent(out) :: status
 
-    real(real64), allocatable :: scopedX(:), scopedY(:), scopedYs(:)
-
-    ys = 0.0d0
     status = 0
 
     ! Only the linear and quadratic surfaces are supported; degree selects the
     ! local polynomial. n > 0 and a positive span are required for a meaningful
-    ! neighbourhood, and the upper bound matches the fixed input arrays.
-    if (n < 1 .or. n > MAX_TRAIL_LENGTH) then
+    ! neighbourhood.
+    if (n < 1) then
         status = 1
         return
     end if
@@ -688,15 +629,7 @@ subroutine ComputeLoessFit(x, y, n, span, degree, ys, status) bind(C, name="Comp
         return
     end if
 
-    allocate(scopedX(n), scopedY(n), scopedYs(n))
-    scopedX = x(1:n)
-    scopedY = y(1:n)
-
-    call LoessFit(n, scopedX, scopedY, span, degree, scopedYs, status)
-
-    if (status == 0) ys(1:n) = scopedYs
-
-    deallocate(scopedX, scopedY, scopedYs)
+    call LoessFit(n, x, y, span, degree, ys, status)
 
 end subroutine ComputeLoessFit
 
