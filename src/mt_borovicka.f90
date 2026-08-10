@@ -51,7 +51,13 @@ real(real64), parameter :: EPS_PARALLEL = 1.0e-30_real64
 ! Generous bound on the free radiant ratios R[non-k]/R[k].
 real(real64), parameter :: RAD_BOUND = 5.0_real64
 
-! Proximity to +/-RAD_BOUND that counts as "on the bound".
+! Half-width (Mm) of the box on the two free point components, centred on the
+! seed point. BorovickaFitOnce builds those bounds from it and OnBound tests the
+! fitted point against the same two walls.
+real(real64), parameter :: POINT_BOUND = 1.0_real64
+
+! Proximity to a box wall -- +/-RAD_BOUND for a ratio, seed +/-POINT_BOUND for a
+! point component -- that counts as "on the bound".
 real(real64), parameter :: ONBOUND_TOL = 1.0e-9_real64
 
 ! Finite distance sentinel for a parallel sight. Squared by
@@ -274,23 +280,30 @@ subroutine BorovickaFF4Grad(&
 end subroutine BorovickaFF4Grad
 
 ! -----------------------------------------------------------------------
-! OnBound -- True if either free radiant ratio sits within ONBOUND_TOL of
-! +/-RAD_BOUND -- the pathological case that triggers a one-shot
+! OnBound -- True if the fit `q` ended pinned on any wall of the box
+! BorovickaFitOnce built around the seed `q0`: a free radiant ratio within
+! ONBOUND_TOL of +/-RAD_BOUND, or a free point component within
+! ONBOUND_TOL of q0 +/-POINT_BOUND. L-BFGS-B reports 'CONVERGENCE' with a
+! coordinate sitting on its wall -- the projected gradient of a
+! bound-active coordinate clamps to zero -- so a parameter pinned on the
+! seed-relative point box is not a trustworthy minimum any more than a
+! pinned ratio is. Both are the pathological case that triggers a one-shot
 ! re-pivot.
 ! -----------------------------------------------------------------------
-pure function OnBound(q) result(res)
-    real(real64), intent(in) :: q(NQ)
+pure function OnBound(q, q0) result(res)
+    real(real64), intent(in) :: q(NQ), q0(NQ)
     logical :: res
 
     res = (abs(abs(q(3)) - RAD_BOUND) < ONBOUND_TOL) .or. &
-          (abs(abs(q(4)) - RAD_BOUND) < ONBOUND_TOL)
+          (abs(abs(q(4)) - RAD_BOUND) < ONBOUND_TOL) .or. &
+          (abs(abs(q(1) - q0(1)) - POINT_BOUND) < ONBOUND_TOL) .or. &
+          (abs(abs(q(2) - q0(2)) - POINT_BOUND) < ONBOUND_TOL)
 end function OnBound
 
 ! -----------------------------------------------------------------------
-! BorovickaFitOnce -- One L-BFGS-B minimisation of FF4 under box bounds
-! Bounds:
-! the point-free parameters are q0(1:2) +/- 1
-! Mm, the radiant ratios +/-RAD_BOUND. The reverse-communication driver and
+! BorovickaFitOnce -- One L-BFGS-B minimisation of FF4 under box bounds.
+! Bounds: the point-free parameters are q0(1:2) +/-POINT_BOUND Mm, the
+! radiant ratios +/-RAD_BOUND. The reverse-communication driver and
 ! convergence-code mapping match MTExpFit:
 !   0 converged, 1 iteration limit, 51 warning, 52 abnormal/other.
 ! status is 0 when the optimiser ran, 1 when it could not be started at all.
@@ -349,11 +362,12 @@ subroutine BorovickaFitOnce(&
         return
     end if
 
-    ! Point-free parameters are bounded +/-1 Mm about the seed, ratios +/-5.
-    lower(1) = q0(1) - 1.0_real64
-    upper(1) = q0(1) + 1.0_real64
-    lower(2) = q0(2) - 1.0_real64
-    upper(2) = q0(2) + 1.0_real64
+    ! Point-free parameters are bounded +/-POINT_BOUND Mm about the seed, ratios
+    ! +/-RAD_BOUND.
+    lower(1) = q0(1) - POINT_BOUND
+    upper(1) = q0(1) + POINT_BOUND
+    lower(2) = q0(2) - POINT_BOUND
+    upper(2) = q0(2) + POINT_BOUND
     lower(3) = -RAD_BOUND
     upper(3) = RAD_BOUND
     lower(4) = -RAD_BOUND
@@ -491,7 +505,7 @@ subroutine BorovickaMinimize4(&
 
     call Reconstruct(qfit, k, pointFixed, P, R)
 
-    if (OnBound(qfit)) then
+    if (OnBound(qfit, q0)) then
         ! Bound-active fit: re-pivot ONCE onto the reconstructed radiant's argmax
         ! and refit, using purely local k2/pf2. Note pf2
         ! and q02 are built from the RECONSTRUCTED P and R, and R is normalised by
@@ -515,7 +529,8 @@ subroutine BorovickaMinimize4(&
         end if
         if (conv /= 0) return
         call Reconstruct(qfit, k2, pf2, P, R)
-        if (OnBound(qfit)) return   ! still bound-active -> non-converged
+        ! q0 now holds the re-pivot seed, so this tests the second fit's own box.
+        if (OnBound(qfit, q0)) return   ! still bound-active -> non-converged
     end if
 
     ! Degenerate-radiant gate, written as .not. (nrm >= EPS) rather than
