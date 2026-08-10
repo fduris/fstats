@@ -5,6 +5,7 @@ module fstats_special_functions
     private
     public :: beta
     public :: regularized_beta
+    public :: regularized_beta_log
     public :: incomplete_beta
     public :: incomplete_gamma_lower
     public :: incomplete_gamma_upper
@@ -59,7 +60,7 @@ pure elemental function regularized_beta(a, b, x) result(rst)
     real(real64), parameter :: zero = 0.0d0
     real(real64), parameter :: one = 1.0d0
     real(real64), parameter :: two = 2.0d0
-    real(real64) :: bt, dk(51), fk(51), s0, t1, t2, ta, tb
+    real(real64) :: bt, fk(51), s0, t2, ta, tb
     integer(int32) :: k
 
     ! Process
@@ -67,19 +68,7 @@ pure elemental function regularized_beta(a, b, x) result(rst)
     bt = beta(a, b)
 
     if (x <= s0) then
-        do k = 1, 20
-            dk(2*k) = k * (b - k) * x / (a + two * k - one) / (a + two * k)
-        end do
-        do k = 0, 20
-            dk(2*k+1) = -(a + k) * (a + b + k) * x / (a + two * k) / &
-                (a + two * k + one)
-        end do
-
-        t1 = zero
-        do k = 20, 1, -1
-            t1 = dk(k) / (one + t1)
-        end do
-        ta = one / (one + t1)
+        ta = beta_cf_small(a, b, x)
         rst = x**a * (one - x)**b / (a * bt) * ta
     else
         do k = 1, 20
@@ -97,6 +86,95 @@ pure elemental function regularized_beta(a, b, x) result(rst)
         end do
         tb = one / (one + t2)
         rst = one - x**a * (one - x)**b / (b * bt) * tb
+    end if
+end function
+
+! ------------------------------------------------------------------------------
+! source: https://people.math.sc.edu/Burkardt/f_src/special_functions/special_functions.f90
+pure elemental function beta_cf_small(a, b, x) result(ta)
+    !! The 20-term continued fraction of the small-argument branch of the
+    !! regularized beta function, i.e. the factor \( t_a \) of
+    !! $$ I_{x}(a,b) = \frac{x^{a} (1-x)^{b}}{a \beta(a,b)} t_{a} $$
+    !! which holds for \( x \le \frac{a+1}{a+b+2} \).
+    !!
+    !! It is written out here rather than inline so that regularized_beta,
+    !! which forms that product directly, and regularized_beta_log, which forms
+    !! it logarithmically, share one definition of the fraction.
+    real(real64), intent(in) :: a
+        !! The first argument of the function.
+    real(real64), intent(in) :: b
+        !! The second argument of the function.
+    real(real64), intent(in) :: x
+        !! The upper limit of the integration.
+    real(real64) :: ta
+        !! The value of the continued fraction.
+
+    ! Local Variables
+    real(real64), parameter :: zero = 0.0d0
+    real(real64), parameter :: one = 1.0d0
+    real(real64), parameter :: two = 2.0d0
+    real(real64) :: dk(51), t1
+    integer(int32) :: k
+
+    ! Process
+    do k = 1, 20
+        dk(2*k) = k * (b - k) * x / (a + two * k - one) / (a + two * k)
+    end do
+    do k = 0, 20
+        dk(2*k+1) = -(a + k) * (a + b + k) * x / (a + two * k) / &
+            (a + two * k + one)
+    end do
+
+    t1 = zero
+    do k = 20, 1, -1
+        t1 = dk(k) / (one + t1)
+    end do
+    ta = one / (one + t1)
+end function
+
+! ------------------------------------------------------------------------------
+pure elemental function regularized_beta_log(a, b, x) result(rst)
+    !! Computes the natural logarithm of the regularized beta function,
+    !! \( \log I_{x}(a,b) \).
+    !!
+    !! For small \( x \) the function itself collapses to zero long before its
+    !! logarithm does. Its value there is
+    !! $$ I_{x}(a,b) = \frac{x^{a} (1-x)^{b}}{a \beta(a,b)} t_{a} $$
+    !! whose numerator leaves the bottom of the floating-point range while the
+    !! division by \( a \beta(a,b) \) would have brought the quotient back
+    !! inside it -- so the directly evaluated function reads zero for a value
+    !! that is merely very small. Summing the same expression in logarithms
+    !! keeps those cases, and costs one exponential's worth of rounding to the
+    !! caller that converts back.
+    !!
+    !! Above the branch point the function is of order one and cannot underflow,
+    !! so it is evaluated directly and its logarithm taken.
+    real(real64), intent(in) :: a
+        !! The first argument of the function.
+    real(real64), intent(in) :: b
+        !! The second argument of the function.
+    real(real64), intent(in) :: x
+        !! The upper limit of the integration.
+    real(real64) :: rst
+        !! The natural logarithm of the regularized beta function.
+
+    ! Local Variables
+    real(real64), parameter :: one = 1.0d0
+    real(real64), parameter :: two = 2.0d0
+    real(real64) :: s0
+
+    ! Process
+    s0 = (a + one) / (a + b + two)
+
+    if (x <= s0) then
+        ! log of x**a (1-x)**b / (a * beta(a,b)) * ta, term by term. The beta
+        ! function is expanded into log-gammas rather than logged after the fact
+        ! because it underflows on its own for large arguments.
+        rst = a * log(x) + b * log(one - x) - log(a) &
+            - (log_gamma(a) + log_gamma(b) - log_gamma(a + b)) &
+            + log(beta_cf_small(a, b, x))
+    else
+        rst = log(regularized_beta(a, b, x))
     end if
 end function
 

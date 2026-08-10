@@ -486,6 +486,10 @@ end subroutine ComputeOlsFit
 ! rssNull is deliberately NOT guarded for finiteness: an NaN rssNull gives
 ! an NaN F and hence NaN, and an infinite rssNull gives F = +Inf and hence
 ! p = 0.
+! The tail is evaluated directly while it is representable and logarithmically
+! once its leading factor drops below the smallest normal double -- without
+! that second regime a strongly significant test reports exactly 0 for a
+! p-value that is only very small (see the switch below).
 ! Stateless.
 ! -----------------------------------------------------------------------
 subroutine ComputeFTestPValue(&
@@ -494,7 +498,7 @@ subroutine ComputeFTestPValue(&
     use, intrinsic :: iso_c_binding, only: c_double, c_int
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use iso_fortran_env, only : real64
-    use fstats_special_functions, only : regularized_beta
+    use fstats_special_functions, only : regularized_beta, regularized_beta_log
 
     ! Residual sum of squares of the null (restricted) model.
     real(c_double), intent(in) :: rssNull
@@ -511,7 +515,7 @@ subroutine ComputeFTestPValue(&
     ! a perfect alternative fit without a worse null fit to compare against).
     integer(c_int), intent(out) :: status
 
-    real(real64) :: fstat, ddf, adf, z
+    real(real64) :: fstat, ddf, adf, z, alpha, betaArg, logLead
 
     p = 0.0d0
     status = 0
@@ -564,7 +568,25 @@ subroutine ComputeFTestPValue(&
     ! I_z(a,b) = 1 - I_{1-z}(b,a) gives the upper tail DIRECTLY, evaluated at
     ! 1-z = d2/(d1*x+d2) with the arguments swapped -- no cancellation.
     z = adf / (ddf * fstat + adf)
-    p = regularized_beta(0.5d0 * adf, 0.5d0 * ddf, z)
+    alpha = 0.5d0 * adf
+    betaArg = 0.5d0 * ddf
+
+    ! I_z(a,b) carries the factor z**a * (1-z)**b, and on a strongly significant
+    ! test that factor is FAR smaller than the tail it belongs to: the division
+    ! by a*B(a,b) lifts the quotient back up by as much as the beta function is
+    ! small. So the factor can fall out of the bottom of the double range while
+    ! the p-value it produces is merely tiny, and the direct evaluation then
+    ! reads exactly 0 -- an "impossible" claim -- for something like 1e-260.
+    ! Below the smallest NORMAL double the factor has already begun losing bits,
+    ! so that is the switch point: take the tail in logs from there down and
+    ! exponentiate once. Above it the direct form is used unchanged, being the
+    ! more accurate of the two (no log/exp round trip).
+    logLead = alpha * log(z) + betaArg * log(1.0d0 - z)
+    if (logLead > log(tiny(1.0d0))) then
+        p = regularized_beta(alpha, betaArg, z)
+    else
+        p = exp(regularized_beta_log(alpha, betaArg, z))
+    end if
 
     ! The continued fraction is a fixed 20-term truncation, so pin the result to
     ! the valid range. NaN (a non-finite rssNull) fails both tests and survives
