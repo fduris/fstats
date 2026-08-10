@@ -64,8 +64,10 @@ subroutine LoessFit(n, x, y, span, degree, ys, status)
     ys = 0.0_real64
     p = degree + 1
 
-    ! Neighbourhood size q = min(n, floor(span*n + Q_TOL)); q >= p is needed for
-    ! a determined local polynomial (the per-point npos check below enforces it).
+    ! Neighbourhood size q = min(n, floor(span*n + Q_TOL)). The tricube support is
+    ! strict (d(j) < dmax, dmax being the q-th smallest distance), so at most q-1
+    ! points carry positive weight and a determined local polynomial needs
+    ! q >= p+1 (the per-point npos check below enforces it).
     q = min(n, int(floor(span * real(n, real64) + Q_TOL), int32))
     if (q < 1) then
         status = 2
