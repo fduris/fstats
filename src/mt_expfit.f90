@@ -118,8 +118,9 @@ end subroutine ExpModelGrad
 !   51 -> warning termination (setulb task 'WARNING...')
 !   52 -> abnormal/other termination (incl. 'ABNORMAL...'/'ERROR...')
 ! `status` is 0 when the optimizer ran, or 1 when it could not be
-! started at all (invalid sizes / workspace allocation failure), in
-! which case `coef` = `seed`, `fval` = 0 and `convergence` = 52.
+! started at all (invalid sizes, an empty box, a negative `factr`, or a
+! workspace allocation failure), in which case `coef` = `seed`,
+! `fval` = 0 and `convergence` = 52.
 ! -----------------------------------------------------------------------
 subroutine ExpFitLBFGSB(&
     ndata, x, y, seed, lower, upper, maxit, lmm, factr, pgtol, coef, fval, convergence, status &
@@ -159,6 +160,15 @@ subroutine ExpFitLBFGSB(&
     g = 0.0_real64
 
     if (ndata < 1 .or. lmm < 1 .or. maxit < 0) then
+        status = 1
+        return
+    end if
+    ! An empty box (any lower bound above its upper bound) has no feasible point.
+    ! A negative factr is likewise not a stop tolerance setulb can honour. Either
+    ! makes setulb terminate on an error task before the first function
+    ! evaluation, leaving `fval` unwritten -- which the caller must not read as a
+    ! fit, so it is rejected here instead.
+    if (any(lower > upper) .or. factr < 0.0_real64) then
         status = 1
         return
     end if
