@@ -8,6 +8,20 @@ set(CMAKE_Fortran_STANDARD_REQUIRED ON)
 
 set(MT_DIR "${CMAKE_BINARY_DIR}/../../..")
 
+# Release artifacts ship stripped. MT reaches every library here across an FFI
+# boundary that resolves through the export table alone, so the symbol table is
+# dead weight in binaries that are committed to the repository.
+#
+# `-s` is a link-time flag: under target_compile_options it is handed to the
+# compiler only and silently does nothing, which is why the shipped libraries
+# were unstripped despite the config asking for it. It has to travel in the
+# linker flags instead. It is set here, ahead of the dependency subdirectories,
+# so that it also reaches ferror/linalg/collections and the BLAS/LAPACK targets
+# LINALG fetches transitively -- those come from third-party CMakeLists this
+# project does not own, so there is no target of ours to hang
+# target_link_options on, and a per-target flag would strip fstats alone.
+set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -s")
+
 add_subdirectory(configure)
 add_subdirectory(dependencies)
 
@@ -95,7 +109,7 @@ endif()
 
 target_compile_options(fstats PRIVATE
     $<$<CONFIG:DEBUG>:-O0 -g>
-    $<$<CONFIG:RELEASE>:-O3 -s>
+    $<$<CONFIG:RELEASE>:-O3>
     -std=f2018
     -Wall -Werror -pedantic -pedantic-errors
     -Wno-error=maybe-uninitialized
