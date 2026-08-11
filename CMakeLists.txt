@@ -22,6 +22,19 @@ set(MT_DIR "${CMAKE_BINARY_DIR}/../../..")
 # target_link_options on, and a per-target flag would strip fstats alone.
 set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -s")
 
+# The win64 artifacts additionally ship with a zeroed build timestamp. GNU ld
+# stamps the wall-clock build time into both the PE COFF header and the export
+# directory, so two links of byte-identical objects still differ there -- and in
+# the PE checksum that covers them -- which is enough to defeat an md5 check of
+# a committed DLL against a rebuild. `--no-insert-timestamp` zeroes both copies.
+# It is a PE-only option that the native ELF linker rejects outright, so it has
+# to stay behind the MINGW guard rather than join the `-s` above; it sits at the
+# same scope for the same reason, so that the dependency subdirectories inherit
+# it too.
+if (MINGW)
+    set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,--no-insert-timestamp")
+endif()
+
 add_subdirectory(configure)
 add_subdirectory(dependencies)
 
