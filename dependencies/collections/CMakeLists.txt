@@ -1,10 +1,15 @@
 include(FetchContent)
 
 # Fetch the proper content
+# Pinned to a revision, not to `main`: MT commits the built artifacts to its
+# repository root, so tracking a branch would silently rebase the shipped
+# binaries onto whatever upstream had pushed that morning and make the build
+# unreproducible. This is the revision the shipped libcollections.so/.dll were
+# built from.
 FetchContent_Declare(
     collections
     GIT_REPOSITORY "https://github.com/jchristopherson/collections"
-    GIT_TAG main
+    GIT_TAG ab0d38bf8936126721e2b3ea6123d3603645a75e
 )
 
 FetchContent_MakeAvailable(collections)

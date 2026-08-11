@@ -2,9 +2,18 @@
 include(FetchContent)
 
 # Fetch the proper content
+# Pinned, not floating: MT commits the built artifacts to its repository root,
+# so an unpinned fetch would silently rebase the shipped binaries onto whatever
+# upstream had pushed that morning and make the build unreproducible. This is
+# the revision the shipped liblinalg.so/.dll were built from.
+#
+# Pinning also keeps this buildable at all: upstream has since removed the
+# include/linalg.h that the configure_file below copies, so a floating fetch
+# now fails at configure time.
 FetchContent_Declare(
     linalg
     GIT_REPOSITORY "https://github.com/jchristopherson/linalg"
+    GIT_TAG 6749505774beb9d901fe9e744fb2be96e22054a3
 )
 
 FetchContent_MakeAvailable(linalg)

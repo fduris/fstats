@@ -2,9 +2,14 @@
 include(FetchContent)
 
 # Fetch the proper content
+# Pinned, not floating: MT commits the built artifacts to its repository root,
+# so an unpinned fetch would silently rebase the shipped binaries onto whatever
+# upstream had pushed that morning and make the build unreproducible. This is
+# the revision the shipped libferror.so/.dll were built from.
 FetchContent_Declare(
     ferror
     GIT_REPOSITORY "https://github.com/jchristopherson/ferror"
+    GIT_TAG 9d6c9750f5c14ef2c806104ea8dfdfc9ce91efed
 )
 
 FetchContent_MakeAvailable(ferror)
