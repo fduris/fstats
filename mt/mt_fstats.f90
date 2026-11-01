@@ -15,33 +15,6 @@ implicit none
 
 contains
 
-subroutine ComputeLowessFit(x, y, ys, n, fsmooth, nstps) bind(C, name="ComputeLowessFit")
-    use, intrinsic :: iso_c_binding, only: c_double, c_int
-    use fstats, only : lowess
-
-    ! The number of points in the input arrays.
-    integer(c_int), intent(in) :: n
-    ! An N-element array containing the independent variable data.  This
-    ! array must be monotonically increasing.
-    real(c_double), intent(in), dimension(n) :: x
-    ! An N-element array containing the dependent variable data.
-    real(c_double), intent(in), dimension(n) :: y
-    ! An N-element array where the smoothed results will be written.
-    real(c_double), intent(out), dimension(n) :: ys
-    ! An optional input that specifies the amount of smoothing.
-    ! Specifically, this value is the fraction of points used to compute
-    ! each value.  As this value increases, the output becomes smoother.
-    ! Choosing a value in the range of 0.2 to 0.8 typically results in a
-    ! good fit.  The default value is 0.2.
-    real(c_double), intent(in) :: fsmooth
-    ! An optional input that specifies the number of iterations.  If set to
-    ! zero, a non-robust fit is returned.  The default value is set to 2.
-    integer(c_int), intent(in) :: nstps
-
-    call lowess(x, y, ys, fsmooth, nstps)
-
-end subroutine ComputeLowessFit
-
 ! -----------------------------------------------------------------------
 ! ComputeGuardedLowessFit -- Robust LOWESS of y on x over a neighbourhood
 ! of ns points, whose robustness passes stop once the robust residual
