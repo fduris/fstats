@@ -42,6 +42,49 @@ subroutine ComputeLowessFit(x, y, ys, n, fsmooth, nstps) bind(C, name="ComputeLo
 
 end subroutine ComputeLowessFit
 
+! -----------------------------------------------------------------------
+! ComputeGuardedLowessFit -- Robust LOWESS of y on x over a neighbourhood
+! of ns points, whose robustness passes stop once the robust residual
+! scale is effectively zero. See mt_lowess.f90. Stateless.
+! -----------------------------------------------------------------------
+subroutine ComputeGuardedLowessFit(x, y, n, ns, nsteps, ys, status) bind(C, name="ComputeGuardedLowessFit")
+    use, intrinsic :: iso_c_binding, only: c_double, c_int
+    use MTLowess, only : GuardedLowess
+
+    ! The number of points in x, y and ys.
+    integer(c_int), intent(in) :: n
+    ! An N-element array containing the independent variable data. This
+    ! array must be non-decreasing.
+    real(c_double), intent(in), dimension(n) :: x
+    ! An N-element array containing the dependent variable data.
+    real(c_double), intent(in), dimension(n) :: y
+    ! The neighbourhood size in points; clamped into [2, n].
+    integer(c_int), intent(in) :: ns
+    ! The largest number of robustness passes after the first fit; 0 gives
+    ! a non-robust fit.
+    integer(c_int), intent(in) :: nsteps
+    ! An N-element array where the smoothed values are written. Meaningful
+    ! only when status = 0; left untouched otherwise.
+    real(c_double), intent(out), dimension(n) :: ys
+    ! 0 if the smoothing was computed; 1 if it could not be started (n < 1
+    ! or nsteps < 0).
+    integer(c_int), intent(out) :: status
+
+    status = 0
+
+    if (n < 1) then
+        status = 1
+        return
+    end if
+    if (nsteps < 0) then
+        status = 1
+        return
+    end if
+
+    call GuardedLowess(n, x, y, ns, nsteps, ys)
+
+end subroutine ComputeGuardedLowessFit
+
 subroutine ComputeExpFitLBFGSB(&
     x, y, n, seed, lower, upper, maxit, lmm, factr, pgtol, coef, fval, convergence, status &
 ) bind(C, name="ComputeExpFitLBFGSB")
