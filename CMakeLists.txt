@@ -62,6 +62,7 @@ set(FSTATS_SOURCES
     src/mt_expfit.f90
     src/mt_robust.f90
     src/mt_loess.f90
+    src/mt_lowess.f90
     src/mt_borovicka.f90
     src/vendored/lbfgsb.f
     src/vendored/linpack_subset.f
